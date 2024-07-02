@@ -21,6 +21,7 @@ const {
   updatedetails,
   UserImage,
   Activate,
+  getDuty,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -67,5 +68,7 @@ Router.post("/Operator/cab-registration", verifyToken, RegisterCab);
 Router.get("/Operator/Activate", verifyToken, Activate);
 
 Router.post("/Book-cab", verifyToken, bookcab);
+
+Router.post("/Operator/get-duty", verifyToken, getDuty);
 
 module.exports = Router;

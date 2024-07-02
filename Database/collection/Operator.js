@@ -68,14 +68,51 @@ const operatorSchema = new Schema(
       type: String,
       required: true,
     },
+    // New fields for geospatial queries
+    From: {
+      description: {
+        type: String,
+      },
+      location: {
+        type: {
+          type: String,
+          enum: ["Point"],
+        },
+        coordinates: {
+          type: [Number],
+        },
+      },
+      place_id: {
+        type: String,
+      },
+    },
+    To: {
+      description: {
+        type: String,
+      },
+      location: {
+        type: {
+          type: String,
+          enum: ["Point"],
+        },
+        coordinates: {
+          type: [Number],
+        },
+      },
+      place_id: {
+        type: String,
+      },
+    },
   },
   { timestamps: true }
 );
 
-// Create geospatial index on the 'City.location' field
-operatorSchema.index({ "City.location": "2dsphere" });
+operatorSchema.index({
+  "City.location": "2dsphere",
+  "From.location": "2dsphere",
+  "To.location": "2dsphere",
+});
 
-// Operator model
 const Operator = mongoose.model("Operator", operatorSchema);
 
 module.exports = Operator;

@@ -1,7 +1,28 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
+const LocationSchema = new Schema({
+  type: {
+    type: String,
+    enum: ["Point"],
+    required: true,
+  },
+  coordinates: {
+    type: [Number],
+    required: true,
+  },
+});
+
 const BookingSchema = new Schema({
+  BookingId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  Name: {
+    type: String,
+    required: true,
+  },
   From: {
     description: {
       type: String,
@@ -12,15 +33,8 @@ const BookingSchema = new Schema({
       required: true,
     },
     location: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        required: true,
-      },
-      coordinates: {
-        type: [Number],
-        required: true,
-      },
+      type: LocationSchema,
+      required: true,
     },
   },
   To: {
@@ -31,14 +45,8 @@ const BookingSchema = new Schema({
       type: String,
     },
     location: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        default: "Point",
-      },
-      coordinates: {
-        type: [Number],
-      },
+      type: LocationSchema,
+      default: null,
     },
   },
   Status: {
@@ -156,11 +164,14 @@ const BookingSchema = new Schema({
       type: Number,
     },
   },
+  PublishOn: {
+    type: Date,
+    require: true,
+    default: Date.now,
+  },
 });
 
-BookingSchema.index({ "from.location": "2dsphere" });
-BookingSchema.index({ "to.location": "2dsphere" });
-
+BookingSchema.index({ "From.location": "2dsphere", "To.location": "2dsphere" });
 const Booking = mongoose.model("Booking", BookingSchema);
 
 module.exports = Booking;

@@ -52,11 +52,13 @@ exports.login = async (req, res) => {
         validity: new Date(new Date().getTime() + 1209600000),
         message: "Login Successful",
         data: {
+          UserId: user.UserId,
           Name: user.Name,
           EmailId: user.EmailId,
           PhoneNo: user.PhoneNo,
           City: user.City,
           Profile: user.Profile,
+          Operator: user.Operator,
         },
       });
     } else {
@@ -257,7 +259,6 @@ try {
   Object.entries(parsedCache).forEach(([key, value]) => {
     cache.set(value[0], value[1].value);
   });
-  console.log("place Cache loaded from file.");
 } catch (error) {
   console.error("Error loading cache:", error);
   cache = new LRUCache({ max: 400000 });
@@ -270,7 +271,6 @@ const getSuggestion = async (query) => {
     }
     const cachedResult = cache.get(query.toLowerCase());
     if (cachedResult) {
-      console.log(`Found result in cache for query: ${query}`);
       return cachedResult;
     }
     const response = await fetch(
@@ -285,7 +285,6 @@ const getSuggestion = async (query) => {
       place_id: prediction.place_id,
     }));
 
-    console.log(`Adding result to cache for query: ${query}`);
     cache.set(query.toLowerCase(), predictions);
     return predictions;
   } catch (error) {
@@ -316,7 +315,6 @@ const saveCacheToFile = () => {
   try {
     const dump = cache.dump();
     fs.writeFileSync(cacheFilePath, JSON.stringify(dump));
-    console.log("Cache saved to file.");
   } catch (error) {
     console.error("Error saving cache:", error);
   }
@@ -344,7 +342,6 @@ try {
   Object.entries(parsedCache).forEach(([key, value]) => {
     citycache.set(value[0], value[1].value);
   });
-  console.log("place city Cache loaded from file.");
 } catch (error) {
   console.error("Error loading cache:", error);
   citycache = new LRUCache({ max: 400000 });
@@ -357,7 +354,6 @@ const getCity = async (query) => {
     }
     const cachedResult = citycache.get(query.toLowerCase());
     if (cachedResult) {
-      console.log(`Found result in cache for query: ${query}`);
       return cachedResult;
     }
     const response = await fetch(
@@ -372,7 +368,6 @@ const getCity = async (query) => {
       place_id: prediction.place_id,
     }));
 
-    console.log(`Adding result to cache for query: ${query}`);
     citycache.set(query.toLowerCase(), predictions);
     return predictions;
   } catch (error) {
@@ -401,7 +396,6 @@ const savecityCacheToFile = () => {
   try {
     const dump = citycache.dump();
     fs.writeFileSync(citycacheFilePath, JSON.stringify(dump));
-    console.log("city Cache saved to file.");
   } catch (error) {
     console.error("Error saving cache:", error);
   }
@@ -430,9 +424,7 @@ try {
   Object.entries(parsedCache).forEach(([key, value]) => {
     d_cache.set(value[0], value[1].value);
   });
-  console.log("distance cache loaded from file.");
 } catch (error) {
-  console.log("Error loading cache:", error);
   d_cache = new LRUCache({ max: 800000 });
 }
 
@@ -445,7 +437,6 @@ const getdistance = async (places) => {
       d_cache.get(`${places[0].place_id}${places[1].place_id}`) ||
       d_cache.get(`${places[1].place_id}${places[0].place_id}`);
     if (cachedResult) {
-      console.log(`Found result in cache for query`);
       return { ...cachedResult, rates: getCurrentRates() };
     }
     const origin = {
@@ -512,7 +503,6 @@ const savedCacheToFile = () => {
   try {
     const dump = d_cache.dump();
     fs.writeFileSync(distancecache, JSON.stringify(dump));
-    console.log("distance Cache saved to file.");
   } catch (error) {
     console.error("Error saving cache:", error);
   }
@@ -549,7 +539,6 @@ exports.logout = async (req, res) => {
     const { UserId, tokens } = req.user;
     const token = req.token;
     let updated = tokens.filter((itm) => itm.token != token);
-    console.log(updated);
     await User.updateOne({ UserId }, { tokens: updated });
     res.status(200).json({ success: true, message: "Looged out" });
   } catch (error) {
@@ -604,9 +593,7 @@ try {
   Object.entries(parsedCache).forEach(([key, value]) => {
     ll_cache.set(value[0], value[1].value);
   });
-  console.log("llcache cache loaded from file.");
 } catch (error) {
-  console.log("Error loading cache:", error);
   ll_cache = new LRUCache({ max: 800000 });
 }
 
@@ -620,7 +607,6 @@ async function getLatLong(address) {
     }
     let ccr = ll_cache.get(address);
     if (ccr) {
-      console.log("found result in cache for query");
       return ccr;
     }
     const response = await fetch(url);
@@ -639,7 +625,6 @@ async function getLatLong(address) {
         place_id: data.results[0].place_id,
       };
       ll_cache.set(res.description, res);
-      console.log("result updated in cache");
       return res;
     } else {
       throw new Error("No result found for the provided address.");
@@ -654,7 +639,6 @@ const savellCacheToFile = () => {
   try {
     const dump = ll_cache.dump();
     fs.writeFileSync(llcache, JSON.stringify(dump));
-    console.log("ll Cache saved to file.");
   } catch (error) {
     console.error("Error saving cache:", error);
   }
@@ -716,7 +700,6 @@ exports.updatedetails = async (req, res) => {
 
 exports.UserImage = async (req, res) => {
   try {
-    console.log("hi");
     const { UserId } = req.params;
     let user = await User.findOne({ UserId: UserId });
     let filePath = path.join(
@@ -1388,7 +1371,6 @@ exports.bookcab = async (req, res) => {
     if (TripType != "Rental" && !To) {
       throw new Error("Invalid Request all fields are required");
     }
-    console.log("hi");
     [From, To].forEach((itm) => {
       if (itm) {
         if (
@@ -1398,7 +1380,6 @@ exports.bookcab = async (req, res) => {
         }
       }
     });
-    console.log("hi");
     if (TripType !== "Rental") {
       let suggest = await getSuggestion(From.query);
       From = suggest.filter((itm) => itm.place_id == From.place_id)[0];
@@ -1447,8 +1428,6 @@ exports.bookcab = async (req, res) => {
       }
       if (Offer < baseFare) {
         throw new Error(`Minimum fare is ₹ ${baseFare}`);
-      } else {
-        console.log(Offer + " is enough");
       }
     } else {
       From = await getLatLong(From.description);
@@ -1474,6 +1453,8 @@ exports.bookcab = async (req, res) => {
     }
 
     let booking = {
+      BookingId: uniqid("booking-"),
+      Name: user.Name,
       From,
       Category,
       Date: Dat,
@@ -1491,6 +1472,110 @@ exports.bookcab = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "You'll start receiving offers from drivers shortly.",
+      data: booking.BookingId,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+exports.getDuty = async (req, res) => {
+  try {
+    let user = req.user;
+    let { From, To, date } = req.body;
+
+    if (!From) {
+      return res.status(400).json({
+        success: false,
+        message: "From location is required",
+      });
+    }
+
+    [From, To].forEach((itm) => {
+      if (itm) {
+        if (["description", "place_id"].some((subitm) => !itm[subitm])) {
+          throw new Error("Invalid input");
+        }
+      }
+    });
+
+    From = await getLatLong(From.description);
+    if (To) {
+      To = await getLatLong(To.description);
+    }
+
+    const fromLocation = From ? From.location : null;
+    const toLocation = To ? To.location : null;
+
+    if (!fromLocation && !toLocation) {
+      return res.status(400).json({
+        success: false,
+        message: "Either from or to location must be provided",
+      });
+    }
+
+    const currentDate = new Date();
+
+    const locationQuery = {
+      $or: [
+        fromLocation && toLocation
+          ? {
+              $and: [
+                {
+                  "From.location": {
+                    $geoWithin: {
+                      $centerSphere: [fromLocation.coordinates, 50 / 6371], // 50 km radius
+                    },
+                  },
+                },
+                {
+                  "To.location": {
+                    $geoWithin: {
+                      $centerSphere: [toLocation.coordinates, 50 / 6371], // 50 km radius
+                    },
+                  },
+                },
+              ],
+            }
+          : {
+              "From.location": {
+                $geoWithin: {
+                  $centerSphere: [fromLocation.coordinates, 50 / 6371], // 50 km radius
+                },
+              },
+            },
+      ],
+    };
+
+    const dateQuery = date
+      ? {
+          Date: {
+            $gte: new Date(new Date(date).setHours(0, 0, 0, 0)),
+            $lte: new Date(new Date(date).setHours(23, 59, 59, 999)),
+          },
+        }
+      : {};
+
+    const query = {
+      Status: "pending",
+      Date: {
+        $gte: new Date(currentDate.getTime() - 2 * 60 * 60 * 1000),
+        ...(date ? dateQuery.Date : {}),
+      },
+      ...locationQuery,
+    };
+
+    const bookings = await Booking.find(query);
+    const update = await Operator.updateOne(
+      { OperatorId: user.Operator.OperatorId },
+      To ? { From, To } : { From }
+    );
+    res.status(200).json({
+      success: true,
+      data: bookings,
     });
   } catch (error) {
     res.status(400).json({

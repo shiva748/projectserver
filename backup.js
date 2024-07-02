@@ -1,158 +1,103 @@
-exports.citysearch = async (req, res) => {
-  const { query } = req.body;
-
-  if (!query) {
-    return res.status(400).send({ error: "Search query is required" });
-  }
-
-  const cachedResult = citycache.get(query.toLowerCase());
-  if (cachedResult) {
-    console.log(`Found result in cache for query: ${query}`);
-    return res.send(cachedResult);
-  }
+exports.getDuty = async (req, res) => {
   try {
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-        query
-      )}&key=${process.env.GOOGLE}&components=country:IN&types=(cities)`
-    );
-    const data = await response.json();
+    let { From, To, date } = req.body;
 
-    const predictions = data.predictions.map((prediction) => ({
-      description: prediction.description,
-      place_id: prediction.place_id,
-    }));
-
-    console.log(`Adding result to cache for query: ${query}`);
-    citycache.set(query.toLowerCase(), predictions);
-
-    res.send(predictions);
-  } catch (error) {
-    res
-      .status(500)
-      .send({ error: "An error occurred while searching for cities" });
-  }
-};
-
-// === === === search === === === //
-
-exports.search = async (req, res) => {
-  const { query } = req.body;
-
-  if (!query) {
-    return res.status(400).send({ error: "Search query is required" });
-  }
-
-  const cachedResult = cache.get(query.toLowerCase());
-  if (cachedResult) {
-    console.log(`Found result in cache for query: ${query}`);
-    return res.send(cachedResult);
-  }
-  try {
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-        query
-      )}&key=${process.env.GOOGLE}&components=country:IN&types=geocode`
-    );
-    const data = await response.json();
-
-    const predictions = data.predictions.map((prediction) => ({
-      description: prediction.description,
-      place_id: prediction.place_id,
-    }));
-
-    console.log(`Adding result to cache for query: ${query}`);
-    cache.set(query.toLowerCase(), predictions);
-
-    res.send(predictions);
-  } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .send({ error: "An error occurred while searching for places" });
-  }
-};
-
-// === === === get distance === === === //
-
-exports.distance = async (req, res) => {
-  try {
-    const { places } = req.body;
-    if (!places || places.length != 2) {
+    if (!From) {
       return res.status(400).json({
-        error: "two places are required to calculate distance",
+        success: false,
+        message: "From location is required",
       });
     }
 
-    const cachedResult =
-      d_cache.get(`${places[0].place_id}${places[1].place_id}`) ||
-      d_cache.get(`${places[1].place_id}${places[0].place_id}`);
-    if (cachedResult) {
-      console.log(`Found result in cache for query`);
-      return res.send({ ...cachedResult, rates: getCurrentRates() });
-    }
-    const origin = {
-      placeId: places[0].place_id,
-    };
-
-    const destination = {
-      placeId: places[1].place_id,
-    };
-
-    const requestBody = {
-      origin,
-      destination,
-      travelMode: "DRIVE",
-      languageCode: "en-US",
-      units: "IMPERIAL",
-    };
-
-    const response = await fetch(
-      "https://routes.googleapis.com/directions/v2:computeRoutes",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": process.env.GOOGLE,
-          "X-Goog-FieldMask":
-            "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline",
-        },
-        body: JSON.stringify(requestBody),
+    [From, To].forEach((itm) => {
+      if (itm) {
+        if (["description", "place_id"].some((subitm) => !itm[subitm])) {
+          throw new Error("Invalid input");
+        }
       }
-    );
+    });
 
-    const data = await response.json();
-    if (data.error) {
-      return res.status(500).json({ error: data.error.message });
+    From = await getLatLong(From.description);
+    if (To) {
+      To = await getLatLong(To.description);
     }
-    data.routes[0].polyline = null;
-    d_cache.set(`${places[0].place_id}${places[1].place_id}`, data.routes[0]);
-    res.json({ ...data.routes[0], rates: getCurrentRates() });
+
+    const currentDate = new Date();
+
+    const baseQuery = {
+      Status: "pending",
+      Date: { $gte: new Date(currentDate.getTime() - 2 * 60 * 60 * 1000) },
+    };
+
+    if (date) {
+      baseQuery.Date = {
+        $gte: new Date(new Date(date).setHours(0, 0, 0, 0)),
+        $lte: new Date(new Date(date).setHours(23, 59, 59, 999)),
+      };
+    }
+
+    const fromQuery = {
+      $geoNear: {
+        near: {
+          type: "Point",
+          coordinates: From.location.coordinates,
+        },
+        distanceField: "distance",
+        maxDistance: 50000, // 50 km
+        spherical: true,
+      },
+    };
+
+    const pipeline = [fromQuery, { $match: baseQuery }];
+
+    let bookings = await Booking.aggregate(pipeline);
+
+    if (To) {
+      bookings = bookings.filter((booking) => {
+        if (
+          booking.To &&
+          booking.To.location &&
+          booking.To.location.coordinates
+        ) {
+          const toLocation = booking.To.location.coordinates;
+          const distanceTo = calculateDistance(
+            toLocation,
+            To.location.coordinates
+          );
+          return distanceTo <= 50000;
+        }
+        return false;
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: bookings,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ error: "An error occurred while processing the request" });
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
   }
 };
 
-// === === === App.js === === === //
+function calculateDistance(coords1, coords2) {
+  const [lon1, lat1] = coords1;
+  const [lon2, lat2] = coords2;
 
-require("dotenv").config();
-// imports
+  const R = 6371e3;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
 
-const express = require("express");
-const port = 3005 || process.env.PORT;
-const Routes = require("./Route/Routes");
-const bodyParser = require("body-parser");
-// initialize
-const app = express();
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-require("./Database/connection");
+  const distance = R * c;
 
-app.use(bodyParser.json());
-
-app.use("/", Routes);
-
-app.listen(port, () => {
-  console.log(`listining to port ${port}`);
-});
+  return distance;
+}

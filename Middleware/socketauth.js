@@ -44,7 +44,6 @@ const partnervalidate = async (socket, next) => {
   try {
     let token = socket.handshake.auth.token;
     const decodedToken = jwt.verify(token, process.env.KEY);
-
     if (!decodedToken) {
       socket.user = { success: false };
       return next();
@@ -59,7 +58,7 @@ const partnervalidate = async (socket, next) => {
       socket.user = { success: false };
       return next();
     }
-    if (user.Operator.verified) {
+    if (!user.Operator.verified) {
       socket.user = { success: false };
       return next();
     }
