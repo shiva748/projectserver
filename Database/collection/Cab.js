@@ -54,7 +54,7 @@ const cabSchema = new Schema(
     },
     Status: {
       type: String,
-      enum: ["pending", "verified", "approved", "suspended", "unlinked"],
+      enum: ["pending", "verified", "suspended", "unlinked"],
       default: "pending",
       required: true,
     },

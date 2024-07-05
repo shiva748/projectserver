@@ -22,6 +22,13 @@ const {
   UserImage,
   Activate,
   getDuty,
+  change_password,
+  mydriver,
+  myCabs,
+  CabImage,
+  DriverImage,
+  getactivecd,
+  postOffer,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -70,5 +77,19 @@ Router.get("/Operator/Activate", verifyToken, Activate);
 Router.post("/Book-cab", verifyToken, bookcab);
 
 Router.post("/Operator/get-duty", verifyToken, getDuty);
+
+Router.post("/change-password", verifyToken, change_password);
+
+Router.post("/Operator/my-drivers", verifyToken, mydriver);
+
+Router.post("/Operator/my-cabs", verifyToken, myCabs);
+
+Router.get("/Cab/:CabId/:Image", CabImage);
+
+Router.get("/Driver/:DriverId/:Image", DriverImage);
+
+Router.post("/Operator/getactive_cd", verifyToken, getactivecd);
+
+Router.post("/Operator/request/offer", verifyToken, postOffer);
 
 module.exports = Router;

@@ -32,7 +32,7 @@ exports.login = async (req, res) => {
       filter.PhoneNo = "+91" + PhoneNo;
     }
 
-    if (!validator.isLength(Password, { min: 9, max: 50 })) {
+    if (!validator.isLength(Password, { min: 8, max: 50 })) {
       const error = new Error("Invalid Credentials");
       error.status = 400;
       throw error;
@@ -95,8 +95,8 @@ exports.signup = async (req, res) => {
       throw new Error("Passwords do not match");
     }
 
-    if (!validator.isLength(Password, { min: 9, max: 50 })) {
-      throw new Error("Password should be at least 9 to 50 characters long");
+    if (!validator.isLength(Password, { min: 8, max: 50 })) {
+      throw new Error("Password should be at least 8 to 50 characters long");
     }
     const existingUser = await User.findOne({
       $or: [{ EmailId: EmailId.toLowerCase() }, { PhoneNo: "+91" + PhoneNo }],
@@ -238,6 +238,43 @@ exports.authenticate = async (req, res) => {
         Profile: user.Profile,
       },
     });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+// === === === change password === === === //
+
+exports.change_password = async (req, res) => {
+  try {
+    const user = req.user;
+    const { Opassword, newPassword } = req.body;
+
+    if (!Opassword || !newPassword) {
+      throw new Error("All fields are required");
+    }
+
+    if (!validator.isLength(Opassword, { min: 8, max: 50 })) {
+      throw new Error("Please enter valid credentials");
+    }
+
+    if (!validator.isLength(newPassword, { min: 8, max: 50 })) {
+      throw new Error("Password must be 8 to 50 characters long");
+    }
+
+    const isMatch = await Bcrypt.compare(Opassword, user.Password);
+    if (!isMatch) {
+      throw new Error("Invalid password");
+    }
+
+    const hashedPassword = await Bcrypt.hash(newPassword, 10);
+    await User.updateOne({ UserId: user.UserId }, { Password: hashedPassword });
+
+    res
+      .status(200)
+      .json({ success: true, message: "Password changed successfully" });
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -700,6 +737,7 @@ exports.updatedetails = async (req, res) => {
 
 exports.UserImage = async (req, res) => {
   try {
+    console.log("hi there");
     const { UserId } = req.params;
     let user = await User.findOne({ UserId: UserId });
     let filePath = path.join(
@@ -1142,7 +1180,7 @@ exports.RegisterDriver = async (req, res) => {
       OperatorId: user.Operator.OperatorId,
       Name: IsDriver ? profile.Name : Name,
       Dob: IsDriver ? profile.Dob : Dob,
-      PhoneNo: IsDriver ? user.PhoneNo : PhoneNo,
+      PhoneNo: IsDriver ? user.PhoneNo : "+91" + PhoneNo,
       Profile: IsDriver ? profile.Profile : filesave.Profile,
       AadhaarCard: {
         Number: IsDriver ? profile.AadhaarCard.Number : AadhaarNumber,
@@ -1463,6 +1501,7 @@ exports.bookcab = async (req, res) => {
       Km,
       Hour,
       UserId: user.UserId,
+      PublishOn: new Date().getTime(),
     };
     if (TripType !== "Rental") {
       booking = { ...booking, To };
@@ -1581,6 +1620,211 @@ exports.getDuty = async (req, res) => {
     res.status(400).json({
       success: false,
       message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+exports.mydriver = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.Operator || !user.Operator.verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access: Operator verification required",
+      });
+    }
+
+    const drivers = await Driver.find({ OperatorId: user.Operator.OperatorId });
+
+    return res.status(200).json({
+      success: true,
+      data: drivers,
+    });
+  } catch (error) {
+    console.error("Error fetching drivers:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error: Unable to fetch drivers",
+      error: error.message,
+    });
+  }
+};
+
+exports.myCabs = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.Operator || !user.Operator.verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access: Operator verification required",
+      });
+    }
+
+    const drivers = await Cab.find({ OperatorId: user.Operator.OperatorId });
+
+    return res.status(200).json({
+      success: true,
+      data: drivers,
+    });
+  } catch (error) {
+    console.error("Error fetching Cabs:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error: Unable to fetch cabs",
+      error: error.message,
+    });
+  }
+};
+
+// === === === Cab Image === === === //
+
+exports.CabImage = async (req, res) => {
+  try {
+    let { CabId, Image } = req.params;
+    if (!CabId && !Image) {
+      return res.status(404).send("Not found");
+    }
+    if (!Image || Image.toLowerCase() == "image") {
+      let cab = await Cab.findOne({ CabId });
+      if (!cab) {
+        return res.status(404).send("Not found");
+      }
+      Image = cab.Photo;
+    }
+    let filePath = path.join(__dirname, `../files/cab/${CabId}/${Image}`);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Not found");
+    }
+    return res.status(200).sendFile(filePath);
+  } catch (error) {
+    res.status(404).send("Not found");
+  }
+};
+
+// === === === Driver Image === === === //
+
+exports.DriverImage = async (req, res) => {
+  try {
+    let { DriverId, Image } = req.params;
+    if (!DriverId && !Image) {
+      return res.status(404).send("Not found");
+    }
+    if (!Image || Image.toLowerCase() == "image") {
+      let driver = await Driver.findOne({ DriverId });
+      if (!driver) {
+        return res.status(404).send("Not found");
+      }
+      Image = driver.Profile;
+    }
+    let filePath = path.join(__dirname, `../files/driver/${DriverId}/${Image}`);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Not found");
+    }
+    return res.status(200).sendFile(filePath);
+  } catch (error) {
+    res.status(404).send("Not found");
+  }
+};
+
+// === === === get Active cab and driver === === === //
+
+exports.getactivecd = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.Operator || !user.Operator.verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access: Operator verification required",
+      });
+    }
+    const cabs = await Cab.find(
+      {
+        OperatorId: user.Operator.OperatorId,
+        Status: "verified",
+      },
+      { CabNumber: 1, CabId: 1, Category: 1 }
+    );
+    const drivers = await Driver.find(
+      {
+        OperatorId: user.Operator.OperatorId,
+        Status: "verified",
+      },
+      { DriverId: 1, Name: 1 }
+    );
+    return res.status(200).json({
+      success: true,
+      data: { drivers, cabs },
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === post offer === === === //
+
+exports.postOffer = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !user.Operator || !user.Operator.verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access: Operator verification required.",
+      });
+    }
+
+    const { BookingId, CabId, DriverId, Offer } = req.body;
+    if (!CabId || !DriverId || !Offer || !BookingId) {
+      throw new Error(
+        "Please provide a valid offer with cab and driver details."
+      );
+    }
+
+    let cab = await Cab.findOne({
+      CabId,
+      OperatorId: user.Operator.OperatorId,
+      Status: "verified",
+    });
+    if (!cab) {
+      throw new Error("Invalid request: Cab not found.");
+    }
+
+    let driver = await Driver.findOne({
+      DriverId,
+      OperatorId: user.Operator.OperatorId,
+      Status: "verified",
+    });
+    if (!driver) {
+      throw new Error("Invalid request: Driver not found.");
+    }
+
+    let booking = await Booking.findOne({ BookingId, Status: "pending" });
+    if (!booking) {
+      throw new Error("Booking is either accepted or canceled.");
+    }
+    booking.Bids = booking.Bids.filter(
+      (itm) => itm.OperatorId != user.Operator.OperatorId
+    );
+    booking.Bids = [
+      { OperatorId: user.Operator.OperatorId, DriverId, CabId, Offer },
+      ...booking.Bids,
+    ];
+    await booking.save();
+    res.status(200).json({
+      success: true,
+      message: "Offer successfully posted.",
+      data: booking,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error.",
     });
   }
 };

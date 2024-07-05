@@ -165,9 +165,8 @@ const BookingSchema = new Schema({
     },
   },
   PublishOn: {
-    type: Date,
+    type: Number,
     require: true,
-    default: Date.now,
   },
 });
 
