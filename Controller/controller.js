@@ -1828,3 +1828,64 @@ exports.postOffer = async (req, res) => {
     });
   }
 };
+
+// === === === get requests === === === //
+
+exports.getrequests = async (req, res) => {
+  try {
+    let user = req.user;
+    let bookings = await Booking.find({
+      UserId: user.UserId,
+      Status: "pending",
+    });
+    return res.status(200).json({ success: true, data: bookings });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error.",
+    });
+  }
+};
+
+// === === === cancel request === === === //
+
+exports.cancelRequest = async (req, res) => {
+  try {
+    const user = req.user;
+    const { BookingId } = req.body;
+
+    if (!BookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "BookingId is required.",
+      });
+    }
+
+    let booking = await Booking.findOne({
+      BookingId,
+      Status: "pending",
+      UserId: user.UserId,
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found or already cancelled.",
+      });
+    }
+
+    booking.Status = "cancelled";
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking request cancelled successfully.",
+    });
+  } catch (error) {
+    console.error("Error cancelling booking request:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal Server Error.",
+    });
+  }
+};

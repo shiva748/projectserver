@@ -29,6 +29,8 @@ const {
   DriverImage,
   getactivecd,
   postOffer,
+  getrequests,
+  cancelRequest,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -91,5 +93,9 @@ Router.get("/Driver/:DriverId/:Image", DriverImage);
 Router.post("/Operator/getactive_cd", verifyToken, getactivecd);
 
 Router.post("/Operator/request/offer", verifyToken, postOffer);
+
+Router.get("/get-request", verifyToken, getrequests);
+
+Router.post("/cancel-request", verifyToken, cancelRequest);
 
 module.exports = Router;
