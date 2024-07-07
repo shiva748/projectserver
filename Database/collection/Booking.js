@@ -99,6 +99,15 @@ const BookingSchema = new Schema({
       DriverId: {
         type: String,
       },
+      Model: {
+        type: String,
+      },
+      Name: {
+        type: String,
+      },
+      Manufacturer: {
+        type: String,
+      },
     },
   ],
   AcceptedBid: {

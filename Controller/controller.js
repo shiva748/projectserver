@@ -1812,7 +1812,15 @@ exports.postOffer = async (req, res) => {
       (itm) => itm.OperatorId != user.Operator.OperatorId
     );
     booking.Bids = [
-      { OperatorId: user.Operator.OperatorId, DriverId, CabId, Offer },
+      {
+        OperatorId: user.Operator.OperatorId,
+        DriverId,
+        CabId,
+        Offer,
+        Model: cab.Model,
+        Name: driver.Name,
+        Manufacturer:cab.Manufacturer
+      },
       ...booking.Bids,
     ];
     await booking.save();

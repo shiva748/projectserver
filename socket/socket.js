@@ -196,6 +196,23 @@ function initializeSocket(server) {
     console.log("partner connected");
     console.log("ID ", socket.id);
     partners.set(socket.user.UserId, socket.id);
+
+    socket.on("newbids", async (data) => {
+      try {
+        let booking = await Booking.findOne({
+          BookingId: data,
+          Status: "pending",
+        });
+        let cs = clients.get(booking.UserId);
+        if (cs) {
+          console.log("Sending");
+          clientio.to(cs).emit("newbids", JSON.stringify(booking));
+        }
+      } catch (error) {
+        console.error("Error processing new bid:", error);
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`partner ${socket.id} disconnected`);
       partners.delete(socket.user.UserId);
