@@ -1,8 +1,8 @@
-// socket.js
 const { Server } = require("socket.io");
 const { clientvalidate, partnervalidate } = require("../Middleware/socketauth");
 const Booking = require("../Database/collection/Booking");
 const Operator = require("../Database/collection/Operator");
+
 function initializeSocket(server) {
   const io = new Server(server);
 
@@ -13,7 +13,6 @@ function initializeSocket(server) {
   const clients = new Map();
 
   // Partner socket namespace
-
   const partnerio = io.of("/partner");
   partnerio.use(partnervalidate);
 
@@ -30,11 +29,26 @@ function initializeSocket(server) {
     }
     console.log("client connected");
     console.log("ID ", socket.id);
-    clients.set(socket.user.UserId, socket.id);
+
+    if (!clients.has(socket.user.UserId)) {
+      clients.set(socket.user.UserId, []);
+    }
+    clients.get(socket.user.UserId).push(socket.id);
+
     socket.on("disconnect", () => {
       console.log(`client ${socket.id} disconnected`);
-      clients.delete(socket.user.UserId);
+      const sockets = clients.get(socket.user.UserId);
+      if (sockets) {
+        const index = sockets.indexOf(socket.id);
+        if (index > -1) {
+          sockets.splice(index, 1);
+        }
+        if (sockets.length === 0) {
+          clients.delete(socket.user.UserId);
+        }
+      }
     });
+
     socket.on("new_booking", async (data) => {
       try {
         let booking = await Booking.findOne({
@@ -97,11 +111,16 @@ function initializeSocket(server) {
           },
           { OperatorId: 1 }
         );
-        operators = operators.forEach((element) => {
+
+        operators.forEach((element) => {
           let ps = partners.get(element.UserId);
           if (ps) {
-            console.log(`sending to ${ps}`);
-            partnerio.to(ps).emit("newbooking", JSON.stringify(booking));
+            ps.forEach((socketId) => {
+              console.log(`sending to ${socketId}`);
+              partnerio
+                .to(socketId)
+                .emit("newbooking", JSON.stringify(booking));
+            });
           } else {
             console.log("use fcm");
           }
@@ -110,6 +129,7 @@ function initializeSocket(server) {
         console.error("Error processing new booking:", error);
       }
     });
+
     socket.on("request_cancel", async (data) => {
       console.log("hi i am cancel");
       try {
@@ -173,15 +193,18 @@ function initializeSocket(server) {
           },
           { OperatorId: 1 }
         );
-        operators = operators.forEach((element) => {
+
+        operators.forEach((element) => {
           let ps = partners.get(element.UserId);
           if (ps) {
-            console.log(`sending to ${ps}`);
-            partnerio.to(ps).emit("request_cancel", booking.BookingId);
+            ps.forEach((socketId) => {
+              console.log(`sending to ${socketId}`);
+              partnerio.to(socketId).emit("request_cancel", booking.BookingId);
+            });
           }
         });
       } catch (error) {
-        console.error("Error processing new booking:", error);
+        console.error("Error processing request cancel:", error);
       }
     });
   });
@@ -195,7 +218,11 @@ function initializeSocket(server) {
     }
     console.log("partner connected");
     console.log("ID ", socket.id);
-    partners.set(socket.user.UserId, socket.id);
+
+    if (!partners.has(socket.user.UserId)) {
+      partners.set(socket.user.UserId, []);
+    }
+    partners.get(socket.user.UserId).push(socket.id);
 
     socket.on("newbids", async (data) => {
       try {
@@ -205,8 +232,10 @@ function initializeSocket(server) {
         });
         let cs = clients.get(booking.UserId);
         if (cs) {
-          console.log("Sending");
-          clientio.to(cs).emit("newbids", JSON.stringify(booking));
+          cs.forEach((socketId) => {
+            console.log("Sending");
+            clientio.to(socketId).emit("newbids", JSON.stringify(booking));
+          });
         }
       } catch (error) {
         console.error("Error processing new bid:", error);
@@ -215,7 +244,16 @@ function initializeSocket(server) {
 
     socket.on("disconnect", () => {
       console.log(`partner ${socket.id} disconnected`);
-      partners.delete(socket.user.UserId);
+      const sockets = partners.get(socket.user.UserId);
+      if (sockets) {
+        const index = sockets.indexOf(socket.id);
+        if (index > -1) {
+          sockets.splice(index, 1);
+        }
+        if (sockets.length === 0) {
+          partners.delete(socket.user.UserId);
+        }
+      }
     });
   });
 

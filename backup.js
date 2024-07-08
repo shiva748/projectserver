@@ -1,103 +1,225 @@
-exports.getDuty = async (req, res) => {
-  try {
-    let { From, To, date } = req.body;
+// socket.js
+const { Server } = require("socket.io");
+const { clientvalidate, partnervalidate } = require("../Middleware/socketauth");
+const Booking = require("../Database/collection/Booking");
+const Operator = require("../Database/collection/Operator");
+function initializeSocket(server) {
+  const io = new Server(server);
 
-    if (!From) {
-      return res.status(400).json({
-        success: false,
-        message: "From location is required",
-      });
+  // Client socket namespace
+  const clientio = io.of("/clients");
+  clientio.use(clientvalidate);
+
+  const clients = new Map();
+
+  // Partner socket namespace
+
+  const partnerio = io.of("/partner");
+  partnerio.use(partnervalidate);
+
+  const partners = new Map();
+
+  // === handeling === //
+
+  clientio.on("connection", (socket) => {
+    if (!socket.user.success) {
+      socket.emit("unauthorized", "can't validate your token");
+      socket.disconnect();
+      console.log("invalid connection request");
+      return;
     }
+    console.log("client connected");
+    console.log("ID ", socket.id);
+    clients.set(socket.user.UserId, socket.id);
+    socket.on("disconnect", () => {
+      console.log(`client ${socket.id} disconnected`);
+      clients.delete(socket.user.UserId);
+    });
+    socket.on("new_booking", async (data) => {
+      try {
+        let booking = await Booking.findOne({
+          UserId: socket.user.UserId,
+          BookingId: data,
+        });
 
-    [From, To].forEach((itm) => {
-      if (itm) {
-        if (["description", "place_id"].some((subitm) => !itm[subitm])) {
-          throw new Error("Invalid input");
+        if (!booking) {
+          return;
+        } else if (booking.Status !== "pending") {
+          return;
         }
+
+        let fromLocation =
+          booking.From && booking.From.location ? booking.From.location : null;
+        let toLocation =
+          booking.To && booking.To.location ? booking.To.location : null;
+
+        if (!fromLocation && !toLocation) {
+          return;
+        }
+
+        let operators = await Operator.find(
+          {
+            $or: [
+              {
+                "City.location": {
+                  $geoWithin: {
+                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                  },
+                },
+              },
+              {
+                "From.location": {
+                  $geoWithin: {
+                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                  },
+                },
+              },
+              {
+                $and: [
+                  {
+                    "From.location": {
+                      $geoWithin: {
+                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                      },
+                    },
+                  },
+                  {
+                    "To.location": {
+                      $geoWithin: {
+                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            Status: "active",
+          },
+          { OperatorId: 1 }
+        );
+        operators = operators.forEach((element) => {
+          let ps = partners.get(element.UserId);
+          if (ps) {
+            console.log(`sending to ${ps}`);
+            partnerio.to(ps).emit("newbooking", JSON.stringify(booking));
+          } else {
+            console.log("use fcm");
+          }
+        });
+      } catch (error) {
+        console.error("Error processing new booking:", error);
+      }
+    });
+    socket.on("request_cancel", async (data) => {
+      console.log("hi i am cancel");
+      try {
+        let booking = await Booking.findOne({
+          UserId: socket.user.UserId,
+          BookingId: data,
+        });
+
+        if (!booking) {
+          return;
+        } else if (booking.Status !== "cancelled") {
+          return;
+        }
+
+        let fromLocation =
+          booking.From && booking.From.location ? booking.From.location : null;
+        let toLocation =
+          booking.To && booking.To.location ? booking.To.location : null;
+
+        if (!fromLocation && !toLocation) {
+          return;
+        }
+
+        let operators = await Operator.find(
+          {
+            $or: [
+              {
+                "City.location": {
+                  $geoWithin: {
+                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                  },
+                },
+              },
+              {
+                "From.location": {
+                  $geoWithin: {
+                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                  },
+                },
+              },
+              {
+                $and: [
+                  {
+                    "From.location": {
+                      $geoWithin: {
+                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                      },
+                    },
+                  },
+                  {
+                    "To.location": {
+                      $geoWithin: {
+                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            Status: "active",
+          },
+          { OperatorId: 1 }
+        );
+        operators = operators.forEach((element) => {
+          let ps = partners.get(element.UserId);
+          if (ps) {
+            console.log(`sending to ${ps}`);
+            partnerio.to(ps).emit("request_cancel", booking.BookingId);
+          }
+        });
+      } catch (error) {
+        console.error("Error processing new booking:", error);
+      }
+    });
+  });
+
+  partnerio.on("connection", (socket) => {
+    if (!socket.user.success) {
+      socket.emit("unauthorized", "can't validate your token");
+      socket.disconnect();
+      console.log("invalid connection request");
+      return;
+    }
+    console.log("partner connected");
+    console.log("ID ", socket.id);
+    partners.set(socket.user.UserId, socket.id);
+
+    socket.on("newbids", async (data) => {
+      try {
+        let booking = await Booking.findOne({
+          BookingId: data,
+          Status: "pending",
+        });
+        let cs = clients.get(booking.UserId);
+        if (cs) {
+          console.log("Sending");
+          clientio.to(cs).emit("newbids", JSON.stringify(booking));
+        }
+      } catch (error) {
+        console.error("Error processing new bid:", error);
       }
     });
 
-    From = await getLatLong(From.description);
-    if (To) {
-      To = await getLatLong(To.description);
-    }
-
-    const currentDate = new Date();
-
-    const baseQuery = {
-      Status: "pending",
-      Date: { $gte: new Date(currentDate.getTime() - 2 * 60 * 60 * 1000) },
-    };
-
-    if (date) {
-      baseQuery.Date = {
-        $gte: new Date(new Date(date).setHours(0, 0, 0, 0)),
-        $lte: new Date(new Date(date).setHours(23, 59, 59, 999)),
-      };
-    }
-
-    const fromQuery = {
-      $geoNear: {
-        near: {
-          type: "Point",
-          coordinates: From.location.coordinates,
-        },
-        distanceField: "distance",
-        maxDistance: 50000, // 50 km
-        spherical: true,
-      },
-    };
-
-    const pipeline = [fromQuery, { $match: baseQuery }];
-
-    let bookings = await Booking.aggregate(pipeline);
-
-    if (To) {
-      bookings = bookings.filter((booking) => {
-        if (
-          booking.To &&
-          booking.To.location &&
-          booking.To.location.coordinates
-        ) {
-          const toLocation = booking.To.location.coordinates;
-          const distanceTo = calculateDistance(
-            toLocation,
-            To.location.coordinates
-          );
-          return distanceTo <= 50000;
-        }
-        return false;
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: bookings,
+    socket.on("disconnect", () => {
+      console.log(`partner ${socket.id} disconnected`);
+      partners.delete(socket.user.UserId);
     });
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message || "Internal Server Error",
-    });
-  }
-};
+  });
 
-function calculateDistance(coords1, coords2) {
-  const [lon1, lat1] = coords1;
-  const [lon2, lat2] = coords2;
-
-  const R = 6371e3;
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  const distance = R * c;
-
-  return distance;
+  return { clientio, partnerio, clients, partners };
 }
+
+module.exports = initializeSocket;
