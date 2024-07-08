@@ -20,6 +20,7 @@
     "mime-types": "^2.1.35",
     "mongoose": "^8.4.1",
     "otpless-node-js-auth-sdk": "^1.0.8",
+    "razorpay": "^2.9.4",
     "socket.io": "^4.7.5",
     "uniqid": "^5.4.0",
     "validator": "^13.12.0"

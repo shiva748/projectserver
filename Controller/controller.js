@@ -6,6 +6,11 @@ const { sendOTP, verifyOTP } = require("otpless-node-js-auth-sdk");
 const uniqid = require("uniqid");
 const { getCurrentRates } = require("./multiplier/fare");
 const Driver = require("../Database/collection/Driver");
+const {
+  initializeWallet,
+  initate_topup,
+} = require("../Database/transaction/transaction");
+
 exports.login = async (req, res) => {
   try {
     const { EmailId, PhoneNo, Password } = req.body;
@@ -1293,11 +1298,12 @@ exports.Activate = async (req, res) => {
         },
       }
     );
-
+    await initializeWallet(user.Operator.OperatorId);
     res
       .status(201)
       .json({ success: true, message: "Profile activation was successful" });
   } catch (error) {
+    console.log(error.message);
     res.status(400).json({
       success: false,
       message: error.message || "Internal Server Error",
@@ -1309,6 +1315,7 @@ exports.Activate = async (req, res) => {
 
 const Cab = require("../Database/collection/Cab");
 const Booking = require("../Database/collection/Booking");
+const Wallet = require("../Database/collection/Wallet");
 
 exports.RegisterCab = async (req, res) => {
   try {
@@ -1819,7 +1826,7 @@ exports.postOffer = async (req, res) => {
         Offer,
         Model: cab.Model,
         Name: driver.Name,
-        Manufacturer:cab.Manufacturer
+        Manufacturer: cab.Manufacturer,
       },
       ...booking.Bids,
     ];
@@ -1892,6 +1899,79 @@ exports.cancelRequest = async (req, res) => {
   } catch (error) {
     console.error("Error cancelling booking request:", error);
     res.status(500).json({
+      success: false,
+      message: error.message || "Internal Server Error.",
+    });
+  }
+};
+
+// === === === Operator Wallet === === === //
+
+exports.getWallet = async (req, res) => {
+  try {
+    let user = req.user;
+    if (
+      !user ||
+      !user.Operator ||
+      !user.Operator.verified ||
+      ["pending", "verified"].includes(user.Operator.Status)
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access: Operator verification required.",
+      });
+    }
+    let wallet = await Wallet.findOne({ OperatorId: user.Operator.OperatorId });
+    if (!wallet) {
+      throw new Error("No Wallet found");
+    }
+    res.status(200).json({ success: true, data: wallet });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error.",
+    });
+  }
+};
+
+// === === === create topup order === === === //
+
+exports.createOrder = async (req, res) => {
+  try {
+    const user = req.user;
+    if (
+      !user ||
+      !user.Operator ||
+      !user.Operator.verified ||
+      ["pending", "verified"].includes(user.Operator.Status)
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized access: Operator verification required.",
+      });
+    }
+
+    const { amount } = req.body;
+
+    if (
+      typeof amount !== "number" ||
+      !Number.isInteger(amount) ||
+      amount < 300 ||
+      amount > 2000
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid amount. Amount must be an integer between 300 and 2000.",
+      });
+    }
+    let order = await initate_topup(user.Operator.OperatorId, amount);
+    if (!order) {
+      throw new Error("Order creation failed");
+    }
+    res.status(201).json({ success: true, data: order });
+  } catch (error) {
+    res.status(400).json({
       success: false,
       message: error.message || "Internal Server Error.",
     });

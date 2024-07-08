@@ -31,6 +31,8 @@ const {
   postOffer,
   getrequests,
   cancelRequest,
+  getWallet,
+  createOrder,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -97,5 +99,9 @@ Router.post("/Operator/request/offer", verifyToken, postOffer);
 Router.get("/get-request", verifyToken, getrequests);
 
 Router.post("/cancel-request", verifyToken, cancelRequest);
+
+Router.get("/Operator/my-wallet", verifyToken, getWallet);
+
+Router.post("/Operator/wallet/topup/create-order", verifyToken, createOrder);
 
 module.exports = Router;
