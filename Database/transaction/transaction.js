@@ -79,59 +79,64 @@ exports.initate_topup = async (operatorId, amount) => {
     throw error;
   }
 };
+const crypto = require("crypto");
 
-// exports.verifyPayment = async (orderId, paymentId, signature) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
+exports.verifySignature = async (
+  razorpay_order_id,
+  razorpay_payment_id,
+  razorpay_signature,
+  operatorId
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-//   try {
-//     // Fetch the transaction details from your database using the orderId
-//     const transaction = await TopUpTransaction.findOne({
-//       _id: orderId,
-//     }).session(session);
+  try {
+    const wallet = await Wallet.findOne({ OperatorId: operatorId }).session(
+      session
+    );
 
-//     if (!transaction) {
-//       const error = new Error("Transaction not found");
-//       error.status = 404;
-//       throw error;
-//     }
+    if (!wallet) {
+      throw new Error("Unauthorized access");
+    }
 
-//     // Verify Razorpay signature
-//     const generatedSignature = 1; /* Implement your signature generation logic */
-//     if (generatedSignature !== signature) {
-//       const error = new Error("Invalid signature");
-//       error.status = 400;
-//       throw error;
-//     }
+    const order = wallet.Transactions.find(
+      (item) => item.orderId === razorpay_order_id
+    );
+    if (!order || order.status !== "pending") {
+      throw new Error("Unauthorized access");
+    }
+    const generatedSignature = crypto
+      .createHmac("sha256", process.env.RZPSECRET)
+      .update(`${order.orderId}|${razorpay_payment_id}`)
+      .digest("hex");
+    if (generatedSignature !== razorpay_signature) {
+      console.log("payment failed");
+      const error = new Error("Invalid signature");
+      error.status = 400;
+      throw error;
+    }
 
-//     // Update transaction status and operator's wallet balance
-//     transaction.status = "completed"; // Assuming successful payment verification
-//     await transaction.save({ session });
+    wallet.Balance += order.amount;
+    order.status = "completed";
+    wallet.Transactions = wallet.Transactions.map((itm) => {
+      if (itm.orderId == order.orderId) {
+        return order;
+      } else {
+        return itm;
+      }
+    });
+    await wallet.save({ session });
+    await session.commitTransaction();
+    session.endSession();
 
-//     const operator = await Wallet.findOne({
-//       owner: transaction.operator,
-//     }).session(session);
-//     if (!operator) {
-//       const error = new Error("Operator wallet not found");
-//       error.status = 404;
-//       throw error;
-//     }
-
-//     operator.balance += transaction.amount;
-//     await operator.save({ session });
-
-//     // Step 3: Commit the transaction
-//     await session.commitTransaction();
-//     session.endSession();
-
-//     return { success: true, message: "Payment verified and wallet updated" };
-//   } catch (error) {
-//     // Step 4: Rollback transaction if any error occurs
-//     await session.abortTransaction();
-//     session.endSession();
-//     throw error;
-//   }
-// };
+    return { success: true, message: "Payment verified and wallet updated" };
+  } catch (error) {
+    // Step 4: Rollback transaction if any error occurs
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
 
 // exports.deductfee = async (operatorId, feeAmount) => {
 //   const session = await mongoose.startSession();

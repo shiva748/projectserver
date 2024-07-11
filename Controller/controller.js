@@ -9,6 +9,7 @@ const Driver = require("../Database/collection/Driver");
 const {
   initializeWallet,
   initate_topup,
+  verifySignature,
 } = require("../Database/transaction/transaction");
 
 exports.login = async (req, res) => {
@@ -1316,6 +1317,7 @@ exports.Activate = async (req, res) => {
 const Cab = require("../Database/collection/Cab");
 const Booking = require("../Database/collection/Booking");
 const Wallet = require("../Database/collection/Wallet");
+const { error } = require("console");
 
 exports.RegisterCab = async (req, res) => {
   try {
@@ -1815,6 +1817,17 @@ exports.postOffer = async (req, res) => {
     if (!booking) {
       throw new Error("Booking is either accepted or canceled.");
     }
+    let wallet = await Wallet.findOne({ OperatorId: user.Operator.OperatorId });
+    if (wallet.Balance < process.env.BIDFEE) {
+      return res.status(200).json({
+        success: false,
+        message:
+          wallet.Balance >= 0
+            ? "Unable to post bid. Please Recharge your wallet"
+            : "Unable to post bid. Please pay your dues",
+        wallet: true,
+      });
+    }
     booking.Bids = booking.Bids.filter(
       (itm) => itm.OperatorId != user.Operator.OperatorId
     );
@@ -1974,6 +1987,239 @@ exports.createOrder = async (req, res) => {
     res.status(400).json({
       success: false,
       message: error.message || "Internal Server Error.",
+    });
+  }
+};
+
+// === === === serve pay === === === //
+
+exports.servepay = async (req, res) => {
+  try {
+    const { UserId, OrderId } = req.params;
+
+    // Validate Operator
+    const user = await User.findOne({ UserId });
+    if (
+      !user ||
+      !user.Operator ||
+      !user.Operator.verified ||
+      ["pending", "verified"].includes(user.Operator.Status)
+    ) {
+      return res.status(404).send("Wallet not found");
+    }
+
+    // Check Operator's Wallet
+    const wallet = await Wallet.findOne({
+      OperatorId: user.Operator.OperatorId,
+    });
+    if (!wallet) {
+      return res.status(404).send("Wallet not found");
+    }
+
+    // Find Order in Wallet Transactions
+    const order = wallet.Transactions.find((item) => item.orderId === OrderId);
+    if (!order || order.status !== "pending") {
+      return res.status(404).send("Order not found or not pending");
+    }
+
+    // Serve Razorpay Payment Page
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Razorpay Payment</title>
+      <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+      <style>
+        /* Add your custom styles here */
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #f0f0f0;
+          padding: 20px;
+        }
+        /* Additional styles as needed */
+      </style>
+    </head>
+    <body>
+      <div id="payment-container">
+        <!-- Razorpay integration script -->
+      </div>
+
+      <script>
+        const key = 'rzp_test_TZAshUrYdjeY7N';
+        const orderId = '${OrderId}';
+        const amount = ${order.amount * 100};
+
+        var options = {
+          key: key,
+          amount: amount,
+          currency: 'INR',
+          name: 'Drive Sync',
+          description: 'Wallet Topup ₹${order.amount}',
+          image: 'https://example.com/logo.png',
+          order_id: orderId,
+          handler: function(response) {
+            alert('Your payment was successful. Please head back to the app.');
+    
+            // Send payment response to server
+            fetch('/Operator/wallet/topup/razorpay/${user.UserId}/${
+      order.orderId
+    }/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                operatorId:'${user.Operator.OperatorId}'
+              })
+            })
+            .then(res => res.json())
+            .then(data => {
+              console.log(data.message);
+            })
+            .catch(err => {
+              console.error('Error:', err);
+            });
+          },
+          prefill: {
+            email: '${user.EmailId}',
+            contact: '${user.PhoneNo.slice(3)}',
+            name: '${user.Name}'
+          },
+          theme: {
+            color: '#53a20e'
+          }
+        };
+
+        // Automatically load Razorpay checkout on page load
+        var rzp = new Razorpay(options);
+        rzp.open();
+        document.addEventListener("visibilitychange", function() {
+          if (document.visibilityState === 'hidden') {
+              // Display a message or take action when the page is hidden
+              alert('Please wait while your payment is being processed.');
+          }
+      });
+      
+      </script>
+    </body>
+    </html>
+    `;
+
+    res.status(200).send(html);
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === verify payment === === === //
+
+exports.verifypayment = async (req, res) => {
+  try {
+    let {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      operatorId,
+    } = req.body;
+    let verify = await verifySignature(
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      operatorId
+    );
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+exports.acceptOffer = async (req, res) => {
+  try {
+    const { BookingId, OperatorId } = req.body;
+    const user = req.user;
+    if (!BookingId || !OperatorId) {
+      throw new Error("Invalid request");
+    }
+    let booking = await Booking.findOne({
+      BookingId,
+      UserId: user.UserId,
+      Status: "pending",
+    });
+    if (!booking) {
+      throw new error("Invalid request");
+    }
+    let bid = await booking.Bids.find((itm) => itm.OperatorId === OperatorId);
+    if (!bid) {
+      throw new Error("can't find the offer");
+    }
+    let driver = await Driver.findOne({
+      OperatorId,
+      DriverId: bid.DriverId,
+      Status: { $ne: "unlinked" },
+    });
+    if (!driver) {
+      throw new Error("can't find the specified driver");
+    }
+    let cab = await Cab.findOne({
+      OperatorId,
+      CabId: bid.CabId,
+      Status: { $ne: "unlinked" },
+    });
+    if (!cab) {
+      throw new Error("can't find the specified cab");
+    }
+    let update = {
+      Status: "confirmed",
+      AcceptedBid: {
+        OperatorId,
+        Offer: bid.Offer,
+        CabId: bid.CabId,
+        DriverId: bid.DriverId,
+      },
+      CabDetails: {
+        CabId: cab.CabId,
+        Number: cab.CabNumber,
+        Model: cab.Model,
+      },
+      DriverDetails: {
+        DriverId: driver.DriverId,
+        Name: driver.Name,
+        PhoneNo: driver.PhoneNo,
+      },
+    };
+    let wallet = await Wallet.findOne({ OperatorId });
+    if (!wallet) {
+      booking.Bids = booking.Bids.filter(
+        (itm) => itm.OperatorId !== OperatorId
+      );
+      await booking.save();
+      throw new Error("Can't process this request");
+    } else if (wallet.Balance < process.env.BIDFEE) {
+      booking.Bids = booking.Bids.filter(
+        (itm) => itm.OperatorId !== OperatorId
+      );
+      await booking.save();
+      throw new Error("Can't process this request");
+    }
+    let result = await Booking.updateOne({ BookingId: BookingId }, update);
+    res.status(200).json({
+      success: true,
+      message: "Offer accepted successfully",
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
     });
   }
 };

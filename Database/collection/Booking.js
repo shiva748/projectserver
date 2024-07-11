@@ -142,7 +142,7 @@ const BookingSchema = new Schema({
     Name: {
       type: String,
     },
-    Number: {
+    PhoneNo: {
       type: String,
       trim: true,
       match: /^[0-9]{10}$/,

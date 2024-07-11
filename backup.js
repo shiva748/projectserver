@@ -1,225 +1,118 @@
-// socket.js
-const { Server } = require("socket.io");
-const { clientvalidate, partnervalidate } = require("../Middleware/socketauth");
-const Booking = require("../Database/collection/Booking");
-const Operator = require("../Database/collection/Operator");
-function initializeSocket(server) {
-  const io = new Server(server);
+exports.servepay = async (req, res) => {
+  try {
+    const { UserId, OrderId } = req.params;
 
-  // Client socket namespace
-  const clientio = io.of("/clients");
-  clientio.use(clientvalidate);
-
-  const clients = new Map();
-
-  // Partner socket namespace
-
-  const partnerio = io.of("/partner");
-  partnerio.use(partnervalidate);
-
-  const partners = new Map();
-
-  // === handeling === //
-
-  clientio.on("connection", (socket) => {
-    if (!socket.user.success) {
-      socket.emit("unauthorized", "can't validate your token");
-      socket.disconnect();
-      console.log("invalid connection request");
-      return;
+    // Validate Operator
+    const user = await User.findOne({ UserId });
+    if (
+      !user ||
+      !user.Operator ||
+      !user.Operator.verified ||
+      ["pending", "verified"].includes(user.Operator.Status)
+    ) {
+      return res.status(404).send("Wallet not found");
     }
-    console.log("client connected");
-    console.log("ID ", socket.id);
-    clients.set(socket.user.UserId, socket.id);
-    socket.on("disconnect", () => {
-      console.log(`client ${socket.id} disconnected`);
-      clients.delete(socket.user.UserId);
+
+    // Check Operator's Wallet
+    const wallet = await Wallet.findOne({
+      OperatorId: user.Operator.OperatorId,
     });
-    socket.on("new_booking", async (data) => {
-      try {
-        let booking = await Booking.findOne({
-          UserId: socket.user.UserId,
-          BookingId: data,
-        });
-
-        if (!booking) {
-          return;
-        } else if (booking.Status !== "pending") {
-          return;
-        }
-
-        let fromLocation =
-          booking.From && booking.From.location ? booking.From.location : null;
-        let toLocation =
-          booking.To && booking.To.location ? booking.To.location : null;
-
-        if (!fromLocation && !toLocation) {
-          return;
-        }
-
-        let operators = await Operator.find(
-          {
-            $or: [
-              {
-                "City.location": {
-                  $geoWithin: {
-                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                  },
-                },
-              },
-              {
-                "From.location": {
-                  $geoWithin: {
-                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                  },
-                },
-              },
-              {
-                $and: [
-                  {
-                    "From.location": {
-                      $geoWithin: {
-                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                      },
-                    },
-                  },
-                  {
-                    "To.location": {
-                      $geoWithin: {
-                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                      },
-                    },
-                  },
-                ],
-              },
-            ],
-            Status: "active",
-          },
-          { OperatorId: 1 }
-        );
-        operators = operators.forEach((element) => {
-          let ps = partners.get(element.UserId);
-          if (ps) {
-            console.log(`sending to ${ps}`);
-            partnerio.to(ps).emit("newbooking", JSON.stringify(booking));
-          } else {
-            console.log("use fcm");
-          }
-        });
-      } catch (error) {
-        console.error("Error processing new booking:", error);
-      }
-    });
-    socket.on("request_cancel", async (data) => {
-      console.log("hi i am cancel");
-      try {
-        let booking = await Booking.findOne({
-          UserId: socket.user.UserId,
-          BookingId: data,
-        });
-
-        if (!booking) {
-          return;
-        } else if (booking.Status !== "cancelled") {
-          return;
-        }
-
-        let fromLocation =
-          booking.From && booking.From.location ? booking.From.location : null;
-        let toLocation =
-          booking.To && booking.To.location ? booking.To.location : null;
-
-        if (!fromLocation && !toLocation) {
-          return;
-        }
-
-        let operators = await Operator.find(
-          {
-            $or: [
-              {
-                "City.location": {
-                  $geoWithin: {
-                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                  },
-                },
-              },
-              {
-                "From.location": {
-                  $geoWithin: {
-                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                  },
-                },
-              },
-              {
-                $and: [
-                  {
-                    "From.location": {
-                      $geoWithin: {
-                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                      },
-                    },
-                  },
-                  {
-                    "To.location": {
-                      $geoWithin: {
-                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
-                      },
-                    },
-                  },
-                ],
-              },
-            ],
-            Status: "active",
-          },
-          { OperatorId: 1 }
-        );
-        operators = operators.forEach((element) => {
-          let ps = partners.get(element.UserId);
-          if (ps) {
-            console.log(`sending to ${ps}`);
-            partnerio.to(ps).emit("request_cancel", booking.BookingId);
-          }
-        });
-      } catch (error) {
-        console.error("Error processing new booking:", error);
-      }
-    });
-  });
-
-  partnerio.on("connection", (socket) => {
-    if (!socket.user.success) {
-      socket.emit("unauthorized", "can't validate your token");
-      socket.disconnect();
-      console.log("invalid connection request");
-      return;
+    if (!wallet) {
+      return res.status(404).send("Wallet not found");
     }
-    console.log("partner connected");
-    console.log("ID ", socket.id);
-    partners.set(socket.user.UserId, socket.id);
 
-    socket.on("newbids", async (data) => {
-      try {
-        let booking = await Booking.findOne({
-          BookingId: data,
-          Status: "pending",
-        });
-        let cs = clients.get(booking.UserId);
-        if (cs) {
-          console.log("Sending");
-          clientio.to(cs).emit("newbids", JSON.stringify(booking));
+    // Find Order in Wallet Transactions
+    const order = wallet.Transactions.find((item) => item.orderId === OrderId);
+    if (!order || order.status !== "pending") {
+      return res.status(404).send("Order not found or not pending");
+    }
+
+    // Serve Razorpay Payment Page
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Razorpay Payment</title>
+      <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+      <style>
+        /* Add your custom styles here */
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #f0f0f0;
+          padding: 20px;
         }
-      } catch (error) {
-        console.error("Error processing new bid:", error);
-      }
+        /* Additional styles as needed */
+      </style>
+    </head>
+    <body>
+      <div id="payment-container">
+        <!-- Razorpay integration script -->
+      </div>
+
+      <script>
+        const key = 'rzp_test_TZAshUrYdjeY7N';
+        const orderId = '${OrderId}';
+        const amount = ${order.amount * 100};
+
+        var options = {
+          key: key,
+          amount: amount,
+          currency: 'INR',
+          name: 'Drive Sync',
+          description: 'Wallet Topup ₹${order.amount}',
+          image: 'https://example.com/logo.png',
+          order_id: orderId,
+          handler: function(response) {
+            alert('Payment successful');
+    
+            // Send payment response to server
+            fetch('/Operator/wallet/topup/razorpay/${user.UserId}/${
+      order.orderId
+    }/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                operatorId:'${user.Operator.OperatorId}'
+              })
+            })
+            .then(res => res.json())
+            .then(data => {
+              console.log(data.message);
+            })
+            .catch(err => {
+              console.error('Error:', err);
+            });
+          },
+          prefill: {
+            email: '${user.EmailId}',
+            contact: '${user.PhoneNo.slice(3)}',
+            name: '${user.Name}'
+          },
+          theme: {
+            color: '#53a20e'
+          }
+        };
+
+        // Automatically load Razorpay checkout on page load
+        var rzp = new Razorpay(options);
+        rzp.open();
+      </script>
+    </body>
+    </html>
+    `;
+
+    res.status(200).send(html);
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
     });
-
-    socket.on("disconnect", () => {
-      console.log(`partner ${socket.id} disconnected`);
-      partners.delete(socket.user.UserId);
-    });
-  });
-
-  return { clientio, partnerio, clients, partners };
-}
-
-module.exports = initializeSocket;
+  }
+};

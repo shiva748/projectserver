@@ -33,6 +33,9 @@ const {
   cancelRequest,
   getWallet,
   createOrder,
+  servepay,
+  verifypayment,
+  acceptOffer,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -103,5 +106,14 @@ Router.post("/cancel-request", verifyToken, cancelRequest);
 Router.get("/Operator/my-wallet", verifyToken, getWallet);
 
 Router.post("/Operator/wallet/topup/create-order", verifyToken, createOrder);
+
+Router.get("/Operator/wallet/topup/razorpay/:UserId/:OrderId", servepay);
+
+Router.post(
+  "/Operator/wallet/topup/razorpay/:OperatorId/:OrderId/verify",
+  verifypayment
+);
+
+Router.post("/request/accept-offer", verifyToken, acceptOffer);
 
 module.exports = Router;
