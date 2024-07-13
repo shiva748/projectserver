@@ -138,58 +138,43 @@ exports.verifySignature = async (
   }
 };
 
-// exports.deductfee = async (operatorId, feeAmount) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
+exports.deductfee = async (operatorId, feeAmount, bookingId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-//   try {
-//     const operatorWallet = await Wallet.findOne({
-//       ownerId: operatorId,
-//     }).session(session);
-//     if (!operatorWallet) {
-//       throw new Error("Operator wallet not found");
-//     }
+  try {
+    const operatorWallet = await Wallet.findOne({
+      OperatorId: operatorId,
+    }).session(session);
+    if (!operatorWallet) {
+      throw new Error("Operator wallet not found");
+    }
 
-//     if (operatorWallet.balance < feeAmount) {
-//       throw new Error("Insufficient funds in operator wallet");
-//     }
+    if (operatorWallet.Balance < feeAmount) {
+      throw new Error("Insufficient funds in operator wallet");
+    }
 
-//     operatorWallet.balance -= feeAmount;
-//     operatorWallet.transactions.push({
-//       amount: -feeAmount,
-//       type: "debit",
-//       from: operatorId,
-//       to: "platform",
-//     });
+    operatorWallet.Balance -= feeAmount;
+    operatorWallet.Transactions.unshift({
+      amount: feeAmount,
+      type: "debit",
+      description: `platform fee for booking ${bookingId}`,
+      status: "completed",
+      transactionId: uniqid("txn-"),
+    });
 
-//     // Assuming platform wallet is a separate entity
-//     const platformWallet = await Wallet.findOne({
-//       /* find platform wallet */
-//     }).session(session);
-//     if (!platformWallet) {
-//       throw new Error("Platform wallet not found");
-//     }
+    await operatorWallet.save();
 
-//     platformWallet.balance += feeAmount;
-//     platformWallet.transactions.push({
-//       amount: feeAmount,
-//       type: "credit",
-//       from: operatorId,
-//       to: "platform",
-//     });
+    await session.commitTransaction();
+    session.endSession();
 
-//     await Promise.all([operatorWallet.save(), platformWallet.save()]);
-
-//     await session.commitTransaction();
-//     session.endSession();
-
-//     return { operatorWallet, platformWallet };
-//   } catch (error) {
-//     await session.abortTransaction();
-//     session.endSession();
-//     throw error;
-//   }
-// };
+    return { result: true };
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
 
 // exports.refundfee = async (operatorId, feeAmount) => {
 //   const session = await mongoose.startSession();

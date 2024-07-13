@@ -23,6 +23,10 @@ const BookingSchema = new Schema({
     type: String,
     required: true,
   },
+  PhoneNo: {
+    type: String,
+    required: true,
+  },
   From: {
     description: {
       type: String,

@@ -10,6 +10,7 @@ const {
   initializeWallet,
   initate_topup,
   verifySignature,
+  deductfee,
 } = require("../Database/transaction/transaction");
 
 exports.login = async (req, res) => {
@@ -718,7 +719,9 @@ exports.updatedetails = async (req, res) => {
       let folderpath = path.join(__dirname, "../files/user/", user.UserId);
       let filesave;
       try {
-        await cleanupFiles(folderpath);
+        if (user.Profile) {
+          await cleanupFiles(folderpath);
+        }
         filesave = await saveFilesToFolder(files, folderpath);
       } catch (error) {
         throw error;
@@ -1502,6 +1505,7 @@ exports.bookcab = async (req, res) => {
     let booking = {
       BookingId: uniqid("booking-"),
       Name: user.Name,
+      PhoneNo: user.PhoneNo,
       From,
       Category,
       Date: Dat,
@@ -1616,7 +1620,7 @@ exports.getDuty = async (req, res) => {
       ...locationQuery,
     };
 
-    const bookings = await Booking.find(query);
+    const bookings = await Booking.find(query, { PhoneNo: 0 });
     const update = await Operator.updateOne(
       { OperatorId: user.Operator.OperatorId },
       To ? { From, To } : { From }
@@ -1813,7 +1817,10 @@ exports.postOffer = async (req, res) => {
       throw new Error("Invalid request: Driver not found.");
     }
 
-    let booking = await Booking.findOne({ BookingId, Status: "pending" });
+    let booking = await Booking.findOne(
+      { BookingId, Status: "pending" },
+      { PhoneNo: 0 }
+    );
     if (!booking) {
       throw new Error("Booking is either accepted or canceled.");
     }
@@ -1862,10 +1869,13 @@ exports.postOffer = async (req, res) => {
 exports.getrequests = async (req, res) => {
   try {
     let user = req.user;
-    let bookings = await Booking.find({
-      UserId: user.UserId,
-      Status: "pending",
-    });
+    let bookings = await Booking.find(
+      {
+        UserId: user.UserId,
+        Status: "pending",
+      },
+      { PhoneNo: 0 }
+    );
     return res.status(200).json({ success: true, data: bookings });
   } catch (error) {
     res.status(400).json({
@@ -1876,7 +1886,6 @@ exports.getrequests = async (req, res) => {
 };
 
 // === === === cancel request === === === //
-
 exports.cancelRequest = async (req, res) => {
   try {
     const user = req.user;
@@ -2197,24 +2206,76 @@ exports.acceptOffer = async (req, res) => {
         PhoneNo: driver.PhoneNo,
       },
     };
-    let wallet = await Wallet.findOne({ OperatorId });
-    if (!wallet) {
-      booking.Bids = booking.Bids.filter(
-        (itm) => itm.OperatorId !== OperatorId
-      );
-      await booking.save();
-      throw new Error("Can't process this request");
-    } else if (wallet.Balance < process.env.BIDFEE) {
-      booking.Bids = booking.Bids.filter(
-        (itm) => itm.OperatorId !== OperatorId
-      );
-      await booking.save();
-      throw new Error("Can't process this request");
+    let deduction = await deductfee(
+      OperatorId,
+      process.env.BIDFEE,
+      booking.BookingId
+    );
+    if (deduction.result) {
+      let result = await Booking.updateOne({ BookingId: BookingId }, update);
+      res.status(200).json({
+        success: true,
+        message: "Offer accepted successfully",
+      });
     }
-    let result = await Booking.updateOne({ BookingId: BookingId }, update);
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === get booking client === === === //
+
+exports.getBookings = async (req, res) => {
+  try {
+    let user = req.user;
+    let booking = await Booking.find(
+      {
+        UserId: user.UserId,
+        Status: { $ne: "pending" },
+      },
+      { Bids: 0, PhoneNo: 0 }
+    );
+    return res.status(200).json({ success: true, data: booking });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === get booking operator === === === //
+
+exports.getOBookings = async (req, res) => {
+  try {
+    let user = req.user;
+    if (
+      !user ||
+      !user.Operator ||
+      !user.Operator.verified ||
+      ["pending", "verified"].includes(user.Operator.Status)
+    ) {
+      return res.status(404).send("Invalid request");
+    }
+    let { type } = req.body;
+    if (!["current", "completed", "cancelled"].some((itm) => itm == type)) {
+      throw new Error("Invalid request");
+    }
+    let filter = {
+      "AcceptedBid.OperatorId": user.Operator.OperatorId,
+    };
+    if (type == "current") {
+      filter = { ...filter, Status: { $in: ["confirmed", "ongoing"] } };
+    } else {
+      filter = { ...filter, Status: type };
+    }
+    let booking = await Booking.find(filter, { Bids: 0 });
     res.status(200).json({
       success: true,
-      message: "Offer accepted successfully",
+      data: booking,
     });
   } catch (error) {
     res.status(400).json({

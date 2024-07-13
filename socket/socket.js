@@ -207,6 +207,89 @@ function initializeSocket(server) {
         console.error("Error processing request cancel:", error);
       }
     });
+
+    socket.on("booking_confirmed", async (data) => {
+      try {
+        let booking = await Booking.findOne({
+          UserId: socket.user.UserId,
+          BookingId: data,
+        });
+
+        if (!booking) {
+          return;
+        } else if (booking.Status !== "confirmed") {
+          return;
+        }
+
+        let fromLocation =
+          booking.From && booking.From.location ? booking.From.location : null;
+        let toLocation =
+          booking.To && booking.To.location ? booking.To.location : null;
+
+        if (!fromLocation && !toLocation) {
+          return;
+        }
+
+        let operators = await Operator.find(
+          {
+            $or: [
+              {
+                "City.location": {
+                  $geoWithin: {
+                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                  },
+                },
+              },
+              {
+                "From.location": {
+                  $geoWithin: {
+                    $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                  },
+                },
+              },
+              {
+                $and: [
+                  {
+                    "From.location": {
+                      $geoWithin: {
+                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                      },
+                    },
+                  },
+                  {
+                    "To.location": {
+                      $geoWithin: {
+                        $centerSphere: [fromLocation.coordinates, 50 / 6371],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            Status: "active",
+          },
+          { OperatorId: 1 }
+        );
+
+        operators.forEach((element) => {
+          let ps = partners.get(element.UserId);
+          if (ps) {
+            ps.forEach((socketId) => {
+              console.log(`sending to ${socketId}`);
+              partnerio.to(socketId).emit(
+                "booking_confirmed",
+                JSON.stringify({
+                  BookingId: booking.BookingId,
+                  OperatorId: booking.AcceptedBid.OperatorId,
+                })
+              );
+            });
+          }
+        });
+      } catch (error) {
+        console.error("Error processing request:", error);
+      }
+    });
   });
 
   partnerio.on("connection", (socket) => {

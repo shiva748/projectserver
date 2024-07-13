@@ -36,6 +36,8 @@ const {
   servepay,
   verifypayment,
   acceptOffer,
+  getBookings,
+  getOBookings,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -115,5 +117,9 @@ Router.post(
 );
 
 Router.post("/request/accept-offer", verifyToken, acceptOffer);
+
+Router.get("/get-booking", verifyToken, getBookings);
+
+Router.post("/Operator/get-booking", verifyToken, getOBookings);
 
 module.exports = Router;
