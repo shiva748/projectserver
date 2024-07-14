@@ -38,6 +38,7 @@ const {
   acceptOffer,
   getBookings,
   getOBookings,
+  cancelBooking,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -104,6 +105,8 @@ Router.post("/Operator/request/offer", verifyToken, postOffer);
 Router.get("/get-request", verifyToken, getrequests);
 
 Router.post("/cancel-request", verifyToken, cancelRequest);
+
+Router.post("/cancel-booking", verifyToken, cancelBooking);
 
 Router.get("/Operator/my-wallet", verifyToken, getWallet);
 

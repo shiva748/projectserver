@@ -21,7 +21,7 @@ exports.initializeWallet = async (OperatorId) => {
     const newWallet = new Wallet({
       OperatorId,
       Balance: 0,
-      transactions: [],
+      Transactions: [],
     });
 
     await newWallet.save({ session });
@@ -80,6 +80,8 @@ exports.initate_topup = async (operatorId, amount) => {
   }
 };
 const crypto = require("crypto");
+const Booking = require("../collection/Booking");
+const { type } = require("os");
 
 exports.verifySignature = async (
   razorpay_order_id,
@@ -176,55 +178,42 @@ exports.deductfee = async (operatorId, feeAmount, bookingId) => {
   }
 };
 
-// exports.refundfee = async (operatorId, feeAmount) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
+exports.refundfee = async (BookingId, UserId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const booking = await Booking.findOne({ BookingId, UserId }).session(
+      session
+    );
+    if (!booking) {
+      throw new Error("No Booking found");
+    } else if (booking.Status !== "confirmed") {
+      throw new Error("Booking can't be cancelled at this stage");
+    }
+    const operatorWallet = await Wallet.findOne({
+      OperatorId: booking.AcceptedBid.OperatorId,
+    }).session(session);
+    if (!operatorWallet) {
+      throw new Error("Operator wallet not found");
+    }
+    operatorWallet.Balance += booking.Fee;
+    operatorWallet.Transactions.unshift({
+      amount: booking.Fee,
+      type: "refund",
+      status: "completed",
+      transactionId: uniqid("txn-"),
+      description: `platform fee refund for booking ${BookingId}`,
+    });
+    booking.Status = "cancelled";
+    await Promise.all([booking.save(), operatorWallet.save()]);
 
-//   try {
-//     // Assuming platform wallet is a separate entity
-//     const platformWallet = await Wallet.findOne({
-//       /* find platform wallet */
-//     }).session(session);
-//     if (!platformWallet) {
-//       throw new Error("Platform wallet not found");
-//     }
+    await session.commitTransaction();
+    session.endSession();
 
-//     if (platformWallet.balance < feeAmount) {
-//       throw new Error("Insufficient funds in platform wallet");
-//     }
-
-//     platformWallet.balance -= feeAmount;
-//     platformWallet.transactions.push({
-//       amount: -feeAmount,
-//       type: "debit",
-//       from: "platform",
-//       to: operatorId,
-//     });
-
-//     const operatorWallet = await Wallet.findOne({
-//       ownerId: operatorId,
-//     }).session(session);
-//     if (!operatorWallet) {
-//       throw new Error("Operator wallet not found");
-//     }
-
-//     operatorWallet.balance += feeAmount;
-//     operatorWallet.transactions.push({
-//       amount: feeAmount,
-//       type: "credit",
-//       from: "platform",
-//       to: operatorId,
-//     });
-
-//     await Promise.all([platformWallet.save(), operatorWallet.save()]);
-
-//     await session.commitTransaction();
-//     session.endSession();
-
-//     return { operatorWallet, platformWallet };
-//   } catch (error) {
-//     await session.abortTransaction();
-//     session.endSession();
-//     throw error;
-//   }
-// };
+    return { success: true, message: "booking cancelled successfully" };
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};

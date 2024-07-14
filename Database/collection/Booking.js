@@ -89,6 +89,11 @@ const BookingSchema = new Schema({
     type: String,
     required: true,
   },
+  Reasons: [
+    {
+      type: String,
+    },
+  ],
   Bids: [
     {
       OperatorId: {
@@ -149,7 +154,6 @@ const BookingSchema = new Schema({
     PhoneNo: {
       type: String,
       trim: true,
-      match: /^[0-9]{10}$/,
     },
   },
   Billing: {
@@ -180,6 +184,9 @@ const BookingSchema = new Schema({
   PublishOn: {
     type: Number,
     require: true,
+  },
+  Fee: {
+    type: Number,
   },
 });
 

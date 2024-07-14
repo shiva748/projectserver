@@ -11,6 +11,7 @@ const {
   initate_topup,
   verifySignature,
   deductfee,
+  refundfee,
 } = require("../Database/transaction/transaction");
 
 exports.login = async (req, res) => {
@@ -746,7 +747,6 @@ exports.updatedetails = async (req, res) => {
 
 exports.UserImage = async (req, res) => {
   try {
-    console.log("hi there");
     const { UserId } = req.params;
     let user = await User.findOne({ UserId: UserId });
     let filePath = path.join(
@@ -1307,7 +1307,6 @@ exports.Activate = async (req, res) => {
       .status(201)
       .json({ success: true, message: "Profile activation was successful" });
   } catch (error) {
-    console.log(error.message);
     res.status(400).json({
       success: false,
       message: error.message || "Internal Server Error",
@@ -1821,6 +1820,9 @@ exports.postOffer = async (req, res) => {
       { BookingId, Status: "pending" },
       { PhoneNo: 0 }
     );
+    if (booking.UserId == user.UserId) {
+      throw new Error("you can't bid on your own request");
+    }
     if (!booking) {
       throw new Error("Booking is either accepted or canceled.");
     }
@@ -2205,19 +2207,23 @@ exports.acceptOffer = async (req, res) => {
         Name: driver.Name,
         PhoneNo: driver.PhoneNo,
       },
+      Fee: process.env.BIDFEE,
     };
-    let deduction = await deductfee(
-      OperatorId,
-      process.env.BIDFEE,
-      booking.BookingId
-    );
-    if (deduction.result) {
-      let result = await Booking.updateOne({ BookingId: BookingId }, update);
-      res.status(200).json({
-        success: true,
-        message: "Offer accepted successfully",
-      });
+    if (process.env.BIDFEE > 0) {
+      let deduction = await deductfee(
+        OperatorId,
+        process.env.BIDFEE,
+        booking.BookingId
+      );
+      if (!deduction.result) {
+        throw new Error("Can't accept this offer");
+      }
     }
+    let result = await Booking.updateOne({ BookingId: BookingId }, update);
+    res.status(200).json({
+      success: true,
+      message: "Offer accepted successfully",
+    });
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -2238,6 +2244,13 @@ exports.getBookings = async (req, res) => {
       },
       { Bids: 0, PhoneNo: 0 }
     );
+    booking = booking.map((itm) => {
+      if (!["confirmed", "ongoing"].some((it) => it == itm.Status)) {
+        itm.DriverDetails = {};
+        return itm;
+      }
+      return itm;
+    });
     return res.status(200).json({ success: true, data: booking });
   } catch (error) {
     res.status(400).json({
@@ -2273,12 +2286,94 @@ exports.getOBookings = async (req, res) => {
       filter = { ...filter, Status: type };
     }
     let booking = await Booking.find(filter, { Bids: 0 });
+    booking = booking.map((itm) => {
+      if (!["confirmed", "ongoing"].some((it) => it == itm.Status)) {
+        itm.PhoneNo = "";
+        return itm;
+      }
+      return itm;
+    });
     res.status(200).json({
       success: true,
       data: booking,
     });
   } catch (error) {
     res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === cancel bookings === === == //
+const reasons = [
+  "Increased fare",
+  "Delayed arrival",
+  "Driver declined",
+  "Unclean vehicle",
+  "Plan changed",
+  "Requested cancellation",
+  "Driver behavior issue",
+];
+
+exports.cancelBooking = async (req, res) => {
+  try {
+    const user = req.user;
+    const { BookingId, Reasons } = req.body;
+
+    if (
+      !Array.isArray(Reasons) ||
+      !Reasons.every(
+        (reason) => typeof reason === "string" && reasons.includes(reason)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid reasons provided. Please provide valid cancellation reasons.",
+      });
+    }
+
+    const booking = await Booking.findOne({
+      UserId: user.UserId,
+      BookingId,
+    });
+
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No Booking found" });
+    }
+
+    if (booking.Status !== "confirmed") {
+      return res.status(400).json({
+        success: false,
+        message: "Booking can't be cancelled in this stage",
+      });
+    }
+
+    if (
+      booking.Fee > 0 &&
+      Reasons.length == 1 &&
+      Reasons[0] == "Plan changed"
+    ) {
+      let refund = await refundfee(booking.BookingId, user.UserId);
+      if (!refund.success) {
+        throw new Error("Request failed, unable to cancel the booking.");
+      }
+    } else {
+      booking.Status = "cancelled";
+      booking.Reasons = Reasons;
+      await booking.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking cancelled successfully",
+      booking,
+    });
+  } catch (error) {
+    return res.status(500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
