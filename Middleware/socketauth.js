@@ -64,14 +64,12 @@ const partnervalidate = async (socket, next) => {
     }
     socket.user = {
       success: true,
-      data: {
-        UserId: user.UserId,
-        Name: user.Name,
-        PhoneNo: user.PhoneNo,
-        EmailId: user.EmailId,
-        City: user.City,
-        Operator: user.Operator,
-      },
+      UserId: user.UserId,
+      Name: user.Name,
+      PhoneNo: user.PhoneNo,
+      EmailId: user.EmailId,
+      City: user.City,
+      Operator: user.Operator,
     };
     next();
   } catch (error) {

@@ -113,7 +113,7 @@ function initializeSocket(server) {
         );
 
         operators.forEach((element) => {
-          let ps = partners.get(element.UserId);
+          let ps = partners.get(element.OperatorId);
           if (ps) {
             ps.forEach((socketId) => {
               console.log(`sending to ${socketId}`);
@@ -131,7 +131,6 @@ function initializeSocket(server) {
     });
 
     socket.on("request_cancel", async (data) => {
-      console.log("hi i am cancel");
       try {
         let booking = await Booking.findOne({
           UserId: socket.user.UserId,
@@ -195,7 +194,7 @@ function initializeSocket(server) {
         );
 
         operators.forEach((element) => {
-          let ps = partners.get(element.UserId);
+          let ps = partners.get(element.OperatorId);
           if (ps) {
             ps.forEach((socketId) => {
               console.log(`sending to ${socketId}`);
@@ -272,7 +271,7 @@ function initializeSocket(server) {
         );
 
         operators.forEach((element) => {
-          let ps = partners.get(element.UserId);
+          let ps = partners.get(element.OperatorId);
           if (ps) {
             ps.forEach((socketId) => {
               console.log(`sending to ${socketId}`);
@@ -290,6 +289,33 @@ function initializeSocket(server) {
         console.error("Error processing request:", error);
       }
     });
+
+    socket.on("booking_cancelled", async (data) => {
+      try {
+        let booking = await Booking.findOne({
+          UserId: socket.user.UserId,
+          BookingId: data,
+        });
+
+        if (!booking) {
+          return;
+        } else if (booking.Status !== "cancelled") {
+          return;
+        }
+
+        let ps = partners.get(booking.AcceptedBid.OperatorId);
+        if (ps) {
+          ps.forEach((socketId) => {
+            console.log(`sending to ${socketId}`);
+            partnerio.to(socketId).emit("booking_cancelled", booking.BookingId);
+          });
+        } else {
+          console.log("fcm");
+        }
+      } catch (error) {
+        console.error("Error processing request:", error);
+      }
+    });
   });
 
   partnerio.on("connection", (socket) => {
@@ -301,11 +327,10 @@ function initializeSocket(server) {
     }
     console.log("partner connected");
     console.log("ID ", socket.id);
-
-    if (!partners.has(socket.user.UserId)) {
-      partners.set(socket.user.UserId, []);
+    if (!partners.has(socket.user.Operator.OperatorId)) {
+      partners.set(socket.user.Operator.OperatorId, []);
     }
-    partners.get(socket.user.UserId).push(socket.id);
+    partners.get(socket.user.Operator.OperatorId).push(socket.id);
 
     socket.on("newbids", async (data) => {
       try {
@@ -327,14 +352,14 @@ function initializeSocket(server) {
 
     socket.on("disconnect", () => {
       console.log(`partner ${socket.id} disconnected`);
-      const sockets = partners.get(socket.user.UserId);
+      const sockets = partners.get(socket.user.Operator.OperatorId);
       if (sockets) {
         const index = sockets.indexOf(socket.id);
         if (index > -1) {
           sockets.splice(index, 1);
         }
         if (sockets.length === 0) {
-          partners.delete(socket.user.UserId);
+          partners.delete(socket.user.Operator.OperatorId);
         }
       }
     });
