@@ -1820,11 +1820,22 @@ exports.postOffer = async (req, res) => {
       { BookingId, Status: "pending" },
       { PhoneNo: 0 }
     );
+    if (!booking) {
+      throw new Error("Booking is either accepted or canceled.");
+    }
     if (booking.UserId == user.UserId) {
       throw new Error("you can't bid on your own request");
     }
-    if (!booking) {
-      throw new Error("Booking is either accepted or canceled.");
+    let prev = booking.Bids.find(
+      (itm) => itm.OperatorId == user.Operator.OperatorId
+    );
+    if (
+      prev &&
+      prev.CabId == cab.CabId &&
+      prev.DriverId == driver.DriverId &&
+      prev.Offer == Offer
+    ) {
+      throw new Error("You cannot submit the same offer again.");
     }
     let wallet = await Wallet.findOne({ OperatorId: user.Operator.OperatorId });
     if (wallet.Balance < process.env.BIDFEE) {
@@ -2226,6 +2237,55 @@ exports.acceptOffer = async (req, res) => {
     });
   } catch (error) {
     res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+// === === === reject offer === === === //
+
+exports.rejectOffer = async (req, res) => {
+  try {
+    const { UserId } = req.user;
+    const { BookingId, OperatorId } = req.body;
+
+    if (!BookingId || !OperatorId) {
+      let error = new Error("Invalid request: Missing BookingId or OperatorId");
+      error.status = 400;
+      throw error;
+    }
+
+    const booking = await Booking.findOne({
+      BookingId,
+      UserId,
+      Status: "pending",
+    });
+    if (!booking) {
+      let error = new Error("Invalid request: Booking not found");
+      error.status = 404;
+      throw error;
+    }
+    let update = false;
+    const updatedBids = booking.Bids.map((bid) => {
+      if (bid.OperatorId == OperatorId) {
+        update = true;
+        return { ...bid, rejected: true };
+      }
+      return bid;
+    });
+    if (!update) {
+      let error = new Error("Invalid request: No Offer found");
+      error.status = 400;
+      throw error;
+    }
+    booking.Bids = updatedBids;
+    await booking.save();
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Offer rejected successfully" });
+  } catch (error) {
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });

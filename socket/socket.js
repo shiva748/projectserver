@@ -316,6 +316,37 @@ function initializeSocket(server) {
         console.error("Error processing request:", error);
       }
     });
+    socket.on("offer_rejected", async (data) => {
+      try {
+        data = JSON.parse(data);
+        let booking = await Booking.findOne({
+          UserId: socket.user.UserId,
+          BookingId: data.BookingId,
+          Status: "pending",
+        });
+
+        if (!booking) {
+          return;
+        } else if (booking.Status !== "pending") {
+          return;
+        }
+        let bid = booking.Bids.find(
+          (itm) => itm.OperatorId == data.OperatorId && itm.rejected
+        );
+        if (!bid) {
+          return;
+        }
+        let ps = partners.get(bid.OperatorId);
+        if (ps) {
+          console.log("sending offer rejection");
+          partnerio.to(ps).emit("offer_rejected", JSON.stringify(booking));
+        } else {
+          console.log("fcm");
+        }
+      } catch (error) {
+        console.error("Error processing request:", error);
+      }
+    });
   });
 
   partnerio.on("connection", (socket) => {

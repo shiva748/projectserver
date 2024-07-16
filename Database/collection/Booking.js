@@ -117,6 +117,9 @@ const BookingSchema = new Schema({
       Manufacturer: {
         type: String,
       },
+      rejected: {
+        type: Boolean,
+      },
     },
   ],
   AcceptedBid: {
