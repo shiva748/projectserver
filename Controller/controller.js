@@ -1791,32 +1791,21 @@ exports.postOffer = async (req, res) => {
       });
     }
 
-    const { BookingId, CabId, DriverId, Offer } = req.body;
-    if (!CabId || !DriverId || !Offer || !BookingId) {
+    const { BookingId, CabId, DriverId, Offer, remove } = req.body;
+    if (!BookingId) {
       throw new Error(
         "Please provide a valid offer with cab and driver details."
       );
     }
-
-    let cab = await Cab.findOne({
-      CabId,
-      OperatorId: user.Operator.OperatorId,
-      Status: "verified",
-    });
-    if (!cab) {
-      throw new Error("Invalid request: Cab not found.");
+    if (!remove) {
+      if (!CabId || !DriverId || !Offer) {
+        throw new Error(
+          "Please provide a valid offer with cab and driver details."
+        );
+      }
     }
-
-    let driver = await Driver.findOne({
-      DriverId,
-      OperatorId: user.Operator.OperatorId,
-      Status: "verified",
-    });
-    if (!driver) {
-      throw new Error("Invalid request: Driver not found.");
-    }
-
-    let booking = await Booking.findOne(
+    let cab, driver, booking;
+    booking = await Booking.findOne(
       { BookingId, Status: "pending" },
       { PhoneNo: 0 }
     );
@@ -1826,47 +1815,74 @@ exports.postOffer = async (req, res) => {
     if (booking.UserId == user.UserId) {
       throw new Error("you can't bid on your own request");
     }
-    let prev = booking.Bids.find(
-      (itm) => itm.OperatorId == user.Operator.OperatorId
-    );
-    if (
-      prev &&
-      prev.CabId == cab.CabId &&
-      prev.DriverId == driver.DriverId &&
-      prev.Offer == Offer
-    ) {
-      throw new Error("You cannot submit the same offer again.");
-    }
-    let wallet = await Wallet.findOne({ OperatorId: user.Operator.OperatorId });
-    if (wallet.Balance < process.env.BIDFEE) {
-      return res.status(200).json({
-        success: false,
-        message:
-          wallet.Balance >= 0
-            ? "Unable to post bid. Please Recharge your wallet"
-            : "Unable to post bid. Please pay your dues",
-        wallet: true,
+    if (!remove) {
+      cab = await Cab.findOne({
+        CabId,
+        OperatorId: user.Operator.OperatorId,
+        Status: "verified",
       });
+      if (!cab) {
+        throw new Error("Invalid request: Cab not found.");
+      }
+
+      driver = await Driver.findOne({
+        DriverId,
+        OperatorId: user.Operator.OperatorId,
+        Status: "verified",
+      });
+      if (!driver) {
+        throw new Error("Invalid request: Driver not found.");
+      }
+
+      let prev = booking.Bids.find(
+        (itm) => itm.OperatorId == user.Operator.OperatorId
+      );
+
+      if (
+        prev &&
+        prev.CabId == cab.CabId &&
+        prev.DriverId == driver.DriverId &&
+        prev.Offer == Offer
+      ) {
+        throw new Error("You cannot submit the same offer again.");
+      }
+      let wallet = await Wallet.findOne({
+        OperatorId: user.Operator.OperatorId,
+      });
+      if (wallet.Balance < process.env.BIDFEE) {
+        return res.status(200).json({
+          success: false,
+          message:
+            wallet.Balance >= 0
+              ? "Unable to post bid. Please Recharge your wallet"
+              : "Unable to post bid. Please pay your dues",
+          wallet: true,
+        });
+      }
     }
     booking.Bids = booking.Bids.filter(
       (itm) => itm.OperatorId != user.Operator.OperatorId
     );
-    booking.Bids = [
-      {
-        OperatorId: user.Operator.OperatorId,
-        DriverId,
-        CabId,
-        Offer,
-        Model: cab.Model,
-        Name: driver.Name,
-        Manufacturer: cab.Manufacturer,
-      },
-      ...booking.Bids,
-    ];
+    if (!remove) {
+      booking.Bids = [
+        {
+          OperatorId: user.Operator.OperatorId,
+          DriverId,
+          CabId,
+          Offer,
+          Model: cab.Model,
+          Name: driver.Name,
+          Manufacturer: cab.Manufacturer,
+        },
+        ...booking.Bids,
+      ];
+    }
     await booking.save();
     res.status(200).json({
       success: true,
-      message: "Offer successfully posted.",
+      message: remove
+        ? "Offer removed successfully"
+        : "Offer successfully posted.",
       data: booking,
     });
   } catch (error) {

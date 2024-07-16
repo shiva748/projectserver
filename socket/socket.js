@@ -381,6 +381,23 @@ function initializeSocket(server) {
       }
     });
 
+    socket.on("removebids", async (data) => {
+      try {
+        let booking = await Booking.findOne({
+          BookingId: data,
+          Status: "pending",
+        });
+        let cs = clients.get(booking.UserId);
+        if (cs) {
+          cs.forEach((socketId) => {
+            clientio.to(socketId).emit("removebids", JSON.stringify(booking));
+          });
+        }
+      } catch (error) {
+        console.error("Error processing new bid:", error);
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`partner ${socket.id} disconnected`);
       const sockets = partners.get(socket.user.Operator.OperatorId);
