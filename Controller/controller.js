@@ -2455,3 +2455,63 @@ exports.cancelBooking = async (req, res) => {
     });
   }
 };
+
+// === === === driver profile === === === //
+
+exports.DriverProfile = async (req, res) => {
+  try {
+    const user = req.user;
+    let driver = await Driver.findOne(
+      {
+        UserId: user.UserId,
+        Status: { $ne: "unlinked" },
+      },
+      { AadhaarCard: 0, DrivingLicence: 0 }
+    );
+    if (driver) {
+      res.status(200).json({ success: true, data: driver });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "Invalid request no driver profile found",
+      });
+    }
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === verify driver profile === === === //
+
+exports.verifyProfile = async (req, res) => {
+  try {
+    let user = req.user;
+    let driver = await Driver.findOne({ UserId: user.UserId });
+    if (!driver) {
+      let error = new Error(
+        "No driver profile found associated with this account"
+      );
+      error.status = 400;
+      throw error;
+    }
+    if (driver.Status != "approved") {
+      let error = new Error("can't verify profile at this stage");
+      error.status = 400;
+      throw error;
+    }
+    driver.Status = "verified";
+    await driver.save();
+    console.log("hi there");
+    return res
+      .status(200)
+      .json({ success: true, message: "profile verified successfully" });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};

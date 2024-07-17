@@ -40,6 +40,8 @@ const {
   getOBookings,
   cancelBooking,
   rejectOffer,
+  DriverProfile,
+  verifyProfile,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -97,7 +99,7 @@ Router.post("/Operator/my-cabs", verifyToken, myCabs);
 
 Router.get("/Cab/:CabId/:Image", CabImage);
 
-Router.get("/Driver/:DriverId/:Image", DriverImage);
+Router.get("/Driver/media/:DriverId/:Image", DriverImage);
 
 Router.post("/Operator/getactive_cd", verifyToken, getactivecd);
 
@@ -127,5 +129,9 @@ Router.post("/request/reject-offer", verifyToken, rejectOffer);
 Router.get("/get-booking", verifyToken, getBookings);
 
 Router.post("/Operator/get-booking", verifyToken, getOBookings);
+
+Router.get("/Driver/get-profile", verifyToken, DriverProfile);
+
+Router.get("/Driver/verify-profile", verifyToken, verifyProfile);
 
 module.exports = Router;
