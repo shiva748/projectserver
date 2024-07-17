@@ -2345,9 +2345,11 @@ exports.getOBookings = async (req, res) => {
       !user ||
       !user.Operator ||
       !user.Operator.verified ||
-      ["pending", "verified"].includes(user.Operator.Status)
+      !["suspended", "verified", "active"].includes(user.Operator.Status)
     ) {
-      return res.status(404).send("Invalid request");
+      return res
+        .status(404)
+        .json({ success: false, message: "Invalid request" });
     }
     let { type } = req.body;
     if (!["current", "completed", "cancelled"].some((itm) => itm == type)) {
@@ -2380,7 +2382,51 @@ exports.getOBookings = async (req, res) => {
     });
   }
 };
+// === === === get booking operator === === === //
 
+exports.getDBookings = async (req, res) => {
+  try {
+    let user = req.user;
+    if (
+      !user ||
+      !user.Driver ||
+      !["suspended", "verified"].includes(user.Driver.Status)
+    ) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Invalid request" });
+    }
+    let { type } = req.body;
+    if (!["current", "completed", "cancelled"].some((itm) => itm == type)) {
+      throw new Error("Invalid request");
+    }
+    let filter = {
+      "DriverDetails.DriverId": user.Driver.DriverId,
+    };
+    if (type == "current") {
+      filter = { ...filter, Status: { $in: ["confirmed", "ongoing"] } };
+    } else {
+      filter = { ...filter, Status: type };
+    }
+    let booking = await Booking.find(filter, { Bids: 0 });
+    booking = booking.map((itm) => {
+      if (!["confirmed", "ongoing"].some((it) => it == itm.Status)) {
+        itm.PhoneNo = "";
+        return itm;
+      }
+      return itm;
+    });
+    res.status(200).json({
+      success: true,
+      data: booking,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
 // === === === cancel bookings === === == //
 const reasons = [
   "Increased fare",
@@ -2504,7 +2550,10 @@ exports.verifyProfile = async (req, res) => {
     }
     driver.Status = "verified";
     await driver.save();
-    console.log("hi there");
+    await User.updateOne(
+      { UserId: user.UserId },
+      { Driver: { Status: "verified", DriverId: driver.DriverId } }
+    );
     return res
       .status(200)
       .json({ success: true, message: "profile verified successfully" });

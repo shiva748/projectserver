@@ -42,6 +42,7 @@ const {
   rejectOffer,
   DriverProfile,
   verifyProfile,
+  getDBookings,
 } = require("../Controller/controller");
 const verifyToken = require("../Middleware/auth");
 
@@ -129,6 +130,8 @@ Router.post("/request/reject-offer", verifyToken, rejectOffer);
 Router.get("/get-booking", verifyToken, getBookings);
 
 Router.post("/Operator/get-booking", verifyToken, getOBookings);
+
+Router.post("/Driver/get-booking", verifyToken, getDBookings);
 
 Router.get("/Driver/get-profile", verifyToken, DriverProfile);
 

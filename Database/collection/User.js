@@ -47,6 +47,15 @@ const userSchema = new Schema({
       type: Boolean,
     },
   },
+  Driver: {
+    DriverId: {
+      type: String,
+    },
+    Status: {
+      type: String,
+      enum: ["approved", "suspended"],
+    },
+  },
   tokens: [
     {
       token: {
