@@ -27,6 +27,10 @@ const BookingSchema = new Schema({
     type: String,
     required: true,
   },
+  OP: {
+    type: Boolean,
+    required: true,
+  },
   From: {
     description: {
       type: String,
