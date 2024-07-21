@@ -174,12 +174,6 @@ const BookingSchema = new Schema({
     EndTime: {
       type: Date,
     },
-    StartKm: {
-      type: Number,
-    },
-    EndKm: {
-      type: Number,
-    },
     FinalAmount: {
       type: Number,
     },

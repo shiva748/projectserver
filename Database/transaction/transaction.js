@@ -131,9 +131,51 @@ exports.verifySignature = async (
     await session.commitTransaction();
     session.endSession();
 
-    return { success: true, message: "Payment verified and wallet updated" };
+    return {
+      success: true,
+      message: "Payment verified and wallet updated",
+      amount: order.amount,
+    };
   } catch (error) {
     // Step 4: Rollback transaction if any error occurs
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+// === === === dismiss payment === === === //
+
+exports.paymentDismiss = async (operatorId, orderId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const wallet = await Wallet.findOne({ OperatorId: operatorId }).session(
+      session
+    );
+
+    if (!wallet) {
+      throw new Error("Unauthorized access");
+    }
+
+    const order = wallet.Transactions.find((item) => item.orderId === orderId);
+    if (!order || order.status !== "pending") {
+      throw new Error("Unauthorized access");
+    }
+    order.status = "failed";
+    wallet.Transactions = wallet.Transactions.map((itm) => {
+      if (itm.orderId == order.orderId) {
+        return order;
+      } else {
+        return itm;
+      }
+    });
+    await wallet.save({ session });
+    await session.commitTransaction();
+    session.endSession();
+
+    return { success: true, message: "Payment failed and wallet updated" };
+  } catch (error) {
     await session.abortTransaction();
     session.endSession();
     throw error;

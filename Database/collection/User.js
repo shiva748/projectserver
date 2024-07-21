@@ -53,12 +53,15 @@ const userSchema = new Schema({
     },
     Status: {
       type: String,
-      enum: ["approved", "suspended"],
+      enum: ["approved", "verified", "suspended"],
     },
   },
   tokens: [
     {
       token: {
+        type: String,
+      },
+      fcm: {
         type: String,
       },
       expire: {

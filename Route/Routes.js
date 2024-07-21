@@ -43,11 +43,33 @@ const {
   DriverProfile,
   verifyProfile,
   getDBookings,
+  failedpayment,
+  storefcm,
+  genrateOtp,
+  startTrip,
+  endTrip,
 } = require("../Controller/controller");
+const path = require("path");
+const fs = require("fs");
 const verifyToken = require("../Middleware/auth");
 
 Router.get("/", (req, res) => {
   res.json({ message: "we are live" });
+});
+
+Router.get("/media/logo.png", (req, res) => {
+  try {
+    let filePath = path.join(__dirname, "../files/logo.png");
+
+    if (fs.existsSync(filePath)) {
+      return res.status(200).sendFile(filePath);
+    } else {
+      return res.status(404).json({ message: "File not found" });
+    }
+  } catch (error) {
+    console.error("Error serving file:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
 });
 
 Router.post("/login", login);
@@ -55,6 +77,8 @@ Router.post("/login", login);
 Router.post("/register", signup);
 
 Router.post("/verify-otp", verifyOTP);
+
+Router.post("/store-fcm", verifyToken, storefcm);
 
 Router.post("/search", verifyToken, search);
 
@@ -119,9 +143,12 @@ Router.post("/Operator/wallet/topup/create-order", verifyToken, createOrder);
 Router.get("/Operator/wallet/topup/razorpay/:UserId/:OrderId", servepay);
 
 Router.post(
-  "/Operator/wallet/topup/razorpay/:OperatorId/:OrderId/verify",
+  "/Operator/wallet/topup/razorpay/:OrderId/verify",
+  verifyToken,
   verifypayment
 );
+
+Router.post("/Operator/wallet/topup/razorpay/:OrderId/failed", failedpayment);
 
 Router.post("/request/accept-offer", verifyToken, acceptOffer);
 
@@ -136,5 +163,11 @@ Router.post("/Driver/get-booking", verifyToken, getDBookings);
 Router.get("/Driver/get-profile", verifyToken, DriverProfile);
 
 Router.get("/Driver/verify-profile", verifyToken, verifyProfile);
+
+Router.post("/Driver/booking/otp", verifyToken, genrateOtp);
+
+Router.post("/Driver/booking/start", verifyToken, startTrip);
+
+Router.post("/Driver/booking/end", verifyToken, endTrip);
 
 module.exports = Router;

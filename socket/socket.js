@@ -2,6 +2,70 @@ const { Server } = require("socket.io");
 const { clientvalidate, partnervalidate } = require("../Middleware/socketauth");
 const Booking = require("../Database/collection/Booking");
 const Operator = require("../Database/collection/Operator");
+const User = require("../Database/collection/User");
+const { sendNotification } = require("../Controller/fcm");
+
+const axios = require("axios");
+
+const locationsInIndia = [
+  // States
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+  "Andaman and Nicobar Islands",
+  "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Lakshadweep",
+  "Delhi",
+  "Puducherry",
+  "Ladakh",
+  "Jammu and Kashmir",
+];
+function getCityName(description) {
+  const parts = description.split(",").map((part) => part.trim());
+  let locationIndex = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (locationsInIndia.includes(parts[i])) {
+      locationIndex = i;
+      break;
+    }
+  }
+
+  if (locationIndex !== -1) {
+    if (locationIndex > 0) {
+      return parts[locationIndex - 1];
+    } else {
+      return parts[locationIndex];
+    }
+  } else {
+    return parts[0];
+  }
+}
 
 function initializeSocket(server) {
   const io = new Server(server);
@@ -70,7 +134,6 @@ function initializeSocket(server) {
         if (!fromLocation && !toLocation) {
           return;
         }
-
         let operators = await Operator.find(
           {
             $or: [
@@ -111,7 +174,7 @@ function initializeSocket(server) {
           },
           { OperatorId: 1 }
         );
-
+        let fcm = [];
         operators.forEach((element) => {
           let ps = partners.get(element.OperatorId);
           if (ps) {
@@ -122,8 +185,28 @@ function initializeSocket(server) {
                 .emit("newbooking", JSON.stringify(booking));
             });
           } else {
-            console.log("use fcm");
+            fcm.push("User-" + element.OperatorId.split("-")[1]);
           }
+        });
+        let message = `A new ${booking.TripType} request of ₹${
+          booking.Offer
+        } from ${getCityName(booking.From.description)}${
+          booking.TripType != "Rental"
+            ? " to " + getCityName(booking.To.description)
+            : ""
+        }`;
+        let oups = await User.find({ UserId: { $in: fcm } }, { tokens: 1 });
+        oups.forEach((itm) => {
+          itm.tokens.forEach((itm) => {
+            if (itm.fcm && itm.expire > new Date().getTime()) {
+              try {
+                sendNotification(itm.fcm, {
+                  title: "New Request",
+                  body: message,
+                });
+              } catch (error) {}
+            }
+          });
         });
       } catch (error) {
         console.error("Error processing new booking:", error);

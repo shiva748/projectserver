@@ -12,6 +12,7 @@ const {
   verifySignature,
   deductfee,
   refundfee,
+  paymentDismiss,
 } = require("../Database/transaction/transaction");
 
 exports.login = async (req, res) => {
@@ -253,6 +254,34 @@ exports.authenticate = async (req, res) => {
     });
   }
 };
+
+// === === === store fcm === === === //
+
+exports.storefcm = async (req, res) => {
+  try {
+    let token = req.token;
+    let { fcm } = req.body;
+    let user = req.user,
+      update = false;
+    let tokens = user.tokens.map((itm) => {
+      if (itm.token == token && itm.fcm != fcm) {
+        update = true;
+        return { token: itm.token, expire: itm.expire, fcm };
+      }
+      return itm;
+    });
+    if (update) {
+      await User.updateOne({ UserId: user.UserId }, { tokens });
+    }
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
 // === === === change password === === === //
 
 exports.change_password = async (req, res) => {
@@ -1320,6 +1349,8 @@ const Cab = require("../Database/collection/Cab");
 const Booking = require("../Database/collection/Booking");
 const Wallet = require("../Database/collection/Wallet");
 const { error } = require("console");
+const { sendNotification } = require("./fcm");
+const { title } = require("process");
 
 exports.RegisterCab = async (req, res) => {
   try {
@@ -1878,6 +1909,20 @@ exports.postOffer = async (req, res) => {
       ];
     }
     await booking.save();
+    if (!remove) {
+      let { tokens } = await User.findOne(
+        { UserId: booking.UserId },
+        { tokens: 1 }
+      );
+      tokens.forEach((itm) => {
+        try {
+          sendNotification(itm.fcm, {
+            title: "New Offer",
+            body: `${driver.Name} is offering ₹${Offer} for your ${booking.TripType} request`,
+          });
+        } catch (error) {}
+      });
+    }
     res.status(200).json({
       success: true,
       message: remove
@@ -2161,6 +2206,7 @@ exports.servepay = async (req, res) => {
 
 exports.verifypayment = async (req, res) => {
   try {
+    let user = req.user;
     let {
       razorpay_order_id,
       razorpay_payment_id,
@@ -2173,6 +2219,30 @@ exports.verifypayment = async (req, res) => {
       razorpay_signature,
       operatorId
     );
+    if (verify.success) {
+      user.tokens.forEach((itm) => {
+        try {
+          sendNotification(itm.fcm, {
+            title: `hi ${user.Name.split(" ")[0]}`,
+            body: `Your operator wallet has been successfully topped up with ₹${verify.amount}`,
+          });
+        } catch (error) {}
+      });
+    }
+    res.status(200).json(verify);
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+// === === === payment failed === === === //
+exports.failedpayment = async (req, res) => {
+  try {
+    let { orderId, operatorId } = req.body;
+    let failed = await paymentDismiss(operatorId, orderId);
+    res.status(200).json(failed);
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -2181,6 +2251,7 @@ exports.verifypayment = async (req, res) => {
   }
 };
 
+// === === === accept offer === === === //
 exports.acceptOffer = async (req, res) => {
   try {
     const { BookingId, OperatorId } = req.body;
@@ -2251,6 +2322,40 @@ exports.acceptOffer = async (req, res) => {
       success: true,
       message: "Offer accepted successfully",
     });
+    try {
+      let oup = await User.findOne({
+        UserId: "User-" + OperatorId.split("-")[1],
+      });
+      oup.tokens.forEach((itm) => {
+        if (itm.fcm && itm.expire > new Date().getTime()) {
+          try {
+            sendNotification(itm.fcm, {
+              title: "New Booking",
+              body: `${user.Name.split(" ")[0]} has accepted your offer of ₹${
+                bid.Offer
+              }`,
+            });
+          } catch (error) {}
+        }
+      });
+      if (oup.Driver.DriverId != driver.DriverId) {
+        oup = await User.findOne({ UserId: driver.UserId });
+        oup.tokens.forEach((itm) => {
+          if (itm.fcm && itm.expire > new Date().getTime()) {
+            try {
+              sendNotification(itm.fcm, {
+                title: "New Booking",
+                body: `You have a new Booking on ${booking.Date.toLocaleDateString(
+                  "en-IN"
+                )}`,
+              });
+            } catch (error) {}
+          }
+        });
+      }
+    } catch (error) {
+      console.log(error);
+    }
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -2489,10 +2594,25 @@ exports.cancelBooking = async (req, res) => {
       await booking.save();
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: "Booking cancelled successfully",
       booking,
+    });
+    let oup = await User.findOne({
+      UserId: "User-" + booking.AcceptedBid.OperatorId.split("-")[1],
+    });
+    oup.tokens.forEach((itm) => {
+      if (itm.fcm && itm.expire > new Date().getTime()) {
+        try {
+          sendNotification(itm.fcm, {
+            title: "Booking cancelled",
+            body: `${user.Name.split(" ")[0]} has cancelled his ${
+              booking.TripType
+            } booking of ₹${booking.AcceptedBid.Offer}`,
+          });
+        } catch (error) {}
+      }
     });
   } catch (error) {
     return res.status(500).json({
@@ -2557,6 +2677,273 @@ exports.verifyProfile = async (req, res) => {
     return res
       .status(200)
       .json({ success: true, message: "profile verified successfully" });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === genrate trip otp === === === //
+function gOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+exports.genrateOtp = async (req, res) => {
+  try {
+    let user = req.user;
+    if (!user || !user.Driver || user.Driver.Status != "verified") {
+      let error = new Error("Invalid request: Unauthorized access1");
+      error.status = 401;
+      throw error;
+    }
+    let { BookingId } = req.body;
+    if (!BookingId) {
+      let error = new Error("No valid BookingId provided");
+      error.status = 400;
+      throw error;
+    }
+    let booking = await Booking.findOne({ BookingId });
+    if (booking.DriverDetails.DriverId != user.Driver.DriverId) {
+      let error = new Error("Invalid request: Unauthorized access2");
+      error.status = 401;
+      throw error;
+    }
+    if (!booking || !["confirmed", "ongoing"].includes(booking.Status)) {
+      let error = new Error("No valid BookingId provided");
+      error.status = 400;
+      throw error;
+    }
+    if (booking.Date.getTime() > new Date().getTime() + 1800000) {
+      return res.status(200).json({
+        success: true,
+        message: "OTP can only be sent 30 minutes before the scheduled time.",
+      });
+    }
+    let otp = "";
+    if (booking.Status == "confirmed") {
+      if (!booking.Billing.Otp.Start) {
+        otp = gOtp();
+        booking.Billing = {
+          ...booking.Billing,
+          Otp: {
+            Start: otp,
+          },
+        };
+      }
+    } else {
+      if (!booking.Billing.Otp.End) {
+        otp = gOtp();
+        booking.Billing = {
+          ...booking.Billing,
+          Otp: {
+            ...booking.Billing.Otp,
+            End: otp,
+          },
+        };
+      }
+    }
+    if (otp) {
+      await booking.save();
+    }
+    let message =
+      booking.Status == "confirmed"
+        ? `${
+            user.Name.split(" ")[0]
+          } is starting the trip. Please provide the OTP ${
+            booking.Billing.Otp.Start
+          } to the driver.`
+        : `${
+            user.Name.split(" ")[0]
+          } is ending the trip. Please provide the OTP ${
+            booking.Billing.Otp.End
+          } to the driver.`;
+    let client = await User.findOne({ UserId: booking.UserId }, { tokens: 1 });
+    client.tokens.forEach((itm) => {
+      if (itm.fcm && itm.expire > new Date().getTime()) {
+        try {
+          sendNotification(itm.fcm, {
+            title:
+              booking.Status == "confirmed"
+                ? "Driver Starting the Trip"
+                : "Driver ending the Trip",
+            body: message,
+          });
+        } catch (error) {}
+      }
+    });
+    return res
+      .status(200)
+      .json({ success: true, message: "OTP sent to client" });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === start trip === === === //
+
+exports.startTrip = async (req, res) => {
+  try {
+    let user = req.user;
+    if (!user || !user.Driver || user.Driver.Status != "verified") {
+      let error = new Error("Invalid request: Unauthorized access");
+      error.status = 401;
+      throw error;
+    }
+    let { BookingId, OTP } = req.body;
+    if (!BookingId || !OTP || !validator.isLength(OTP, { min: 6, max: 6 })) {
+      let error = new Error("No valid BookingId and OTP provided");
+      error.status = 400;
+      throw error;
+    }
+    let booking = await Booking.findOne({ BookingId });
+    if (!booking || !["confirmed"].includes(booking.Status)) {
+      let error = new Error("No valid BookingId provided");
+      error.status = 400;
+      throw error;
+    }
+    if (booking.Date.getTime() > new Date().getTime() + 1800000) {
+      return res.status(200).json({
+        success: true,
+        message:
+          "Trip can be started only 30 minutes before the scheduled time.",
+      });
+    }
+    if (!booking.Billing.Otp.Start) {
+      let error = new Error("Please genarate a OTP first");
+      error.status = 400;
+      throw error;
+    }
+    if (booking.Billing.Otp.Start != OTP) {
+      let error = new Error("Invalid otp");
+      error.status = 400;
+      throw error;
+    }
+    booking.Status = "ongoing";
+    booking.Billing.StartTime = new Date();
+    await booking.save();
+    res.status(200).json({ success: true, message: "Trip started" });
+    try {
+      let message = `${user.Name.split(" ")[0]} has started the trip.`;
+      let client = await User.findOne(
+        { UserId: booking.UserId },
+        { tokens: 1 }
+      );
+      client.tokens.forEach((itm) => {
+        if (itm.fcm && itm.expire > new Date().getTime()) {
+          try {
+            sendNotification(itm.fcm, {
+              title: "Driver Started the Trip",
+              body: message,
+            });
+          } catch (error) {}
+        }
+      });
+      if (booking.AcceptedBid.OperatorId == user.Operator.OperatorId) {
+        return;
+      }
+      let operator = await Operator.findOne(
+        {
+          UserId: "User-" + booking.AcceptedBid.OperatorId.split("-")[1],
+        },
+        { tokens: 1 }
+      );
+      operator.tokens.forEach((itm) => {
+        if (itm.fcm && itm.expire > new Date().getTime()) {
+          try {
+            sendNotification(itm.fcm, {
+              title: "Driver Started the Trip",
+              body: message,
+            });
+          } catch (error) {}
+        }
+      });
+    } catch (error) {}
+  } catch (error) {
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === end trip === === === //
+
+exports.endTrip = async (req, res) => {
+  try {
+    let user = req.user;
+    if (!user || !user.Driver || user.Driver.Status != "verified") {
+      let error = new Error("Invalid request: Unauthorized access");
+      error.status = 401;
+      throw error;
+    }
+    let { BookingId, OTP } = req.body;
+    if (!BookingId || !OTP || !validator.isLength(OTP, { min: 6, max: 6 })) {
+      let error = new Error("No valid BookingId and OTP provided");
+      error.status = 400;
+      throw error;
+    }
+    let booking = await Booking.findOne({ BookingId });
+    if (!booking || !["ongoing"].includes(booking.Status)) {
+      let error = new Error("No valid BookingId provided");
+      error.status = 400;
+      throw error;
+    }
+    if (booking.Date.getTime() > new Date().getTime() + 1800000) {
+      return res.status(200).json({
+        success: true,
+        message:
+          "Trip can be started only 30 minutes before the scheduled time.",
+      });
+    }
+    if (booking.Billing.Otp.End != OTP) {
+      let error = new Error("Invalid otp");
+      error.status = 400;
+      throw error;
+    }
+    booking.Status = "completed";
+    booking.Billing.EndTime = new Date();
+    await booking.save();
+    res.status(200).json({ success: true, message: "Trip ended" });
+    try {
+      let message = `${user.Name.split(" ")[0]} has ended the trip.`;
+      let client = await User.findOne(
+        { UserId: booking.UserId },
+        { tokens: 1 }
+      );
+      client.tokens.forEach((itm) => {
+        if (itm.fcm && itm.expire > new Date().getTime()) {
+          try {
+            sendNotification(itm.fcm, {
+              title: "Driver Ended the Trip",
+              body: message,
+            });
+          } catch (error) {}
+        }
+      });
+      if (booking.AcceptedBid.OperatorId == user.Operator.OperatorId) {
+        return;
+      }
+      let operator = await Operator.findOne(
+        {
+          UserId: "User-" + booking.AcceptedBid.OperatorId.split("-")[1],
+        },
+        { tokens: 1 }
+      );
+      operator.tokens.forEach((itm) => {
+        if (itm.fcm && itm.expire > new Date().getTime()) {
+          try {
+            sendNotification(itm.fcm, {
+              title: "Driver ended the Trip",
+              body: message,
+            });
+          } catch (error) {}
+        }
+      });
+    } catch (error) {}
   } catch (error) {
     res.status(error.status || 500).json({
       success: false,
