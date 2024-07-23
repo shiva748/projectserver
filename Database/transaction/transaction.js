@@ -247,6 +247,7 @@ exports.refundfee = async (BookingId, UserId) => {
       description: `platform fee refund for booking ${BookingId}`,
     });
     booking.Status = "cancelled";
+    booking.Fee = 0;
     await Promise.all([booking.save(), operatorWallet.save()]);
 
     await session.commitTransaction();

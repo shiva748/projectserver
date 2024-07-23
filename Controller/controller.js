@@ -897,7 +897,7 @@ exports.registerOperator = async (req, res) => {
       OperatorId: id,
       Name: fields.Name,
       City: user.City,
-      Dob: fields.Dob,
+      Dob: dob,
       AadhaarCard: {
         Number: fields.AadhaarNumber,
         FrontImage: filesave.AadhaarFront,
@@ -1433,19 +1433,50 @@ exports.RegisterCab = async (req, res) => {
 exports.bookcab = async (req, res) => {
   try {
     const user = req.user;
-    let { From, To, Dat, Time, Category, TripType, Offer, Hour, Km } = req.body;
-    ["From", "Dat", "Time", "Category", "TripType", "Offer"].forEach((itm) => {
+    let {
+      From,
+      To,
+      Dat,
+      Time,
+      Category,
+      TripType,
+      Offer,
+      Hour,
+      Km,
+      Operator,
+      returndate,
+    } = req.body;
+    [
+      "From",
+      "Dat",
+      "Time",
+      "Category",
+      "TripType",
+      "Offer",
+      "Operator",
+    ].forEach((itm) => {
       if (!req.body[itm]) {
         throw new Error("Invalid Request all fields are required");
       }
     });
-
+    if (!["Yes", "No"].includes(Operator)) {
+      throw new Error("Invalid input");
+    }
+    if (Operator == "Yes") {
+      if (
+        !user.Operator ||
+        !user.Operator.verified ||
+        user.Operator.Status !== "active"
+      ) {
+        throw new Error("Unauthorized access: you are not a operator");
+      }
+    }
     if (!["Roundtrip", "Oneway", "Rental"].some((itm) => itm == TripType)) {
-      throw new Error("Invalid input 1");
+      throw new Error("Invalid input");
     }
 
     if (!["Micro", "Sedan", "MUV", "SUV"].some((itm) => itm == Category)) {
-      throw new Error("Invalid input 2");
+      throw new Error("Invalid input");
     }
 
     if (TripType != "Rental" && !To) {
@@ -1483,8 +1514,15 @@ exports.bookcab = async (req, res) => {
     let d_t = new Date(Dat);
     d_t.setHours(t_d.getHours());
     d_t.setMinutes(t_d.getMinutes());
-    if (thf > t_d) {
+    if (thf > d_t) {
       throw new Error("Select a date and time at least 2 hours in the future.");
+    }
+    if (TripType == "Roundtrip") {
+      if (returndate < Dat) {
+        throw new Error(
+          "The return date must be the same as or later than the pickup date."
+        );
+      }
     }
     Dat = d_t;
     if (TripType !== "Rental") {
@@ -1525,7 +1563,7 @@ exports.bookcab = async (req, res) => {
       }
 
       let baseFare = Math.ceil(
-        (Km * rates["Roundtrip"] + Hour * rates["Waitingcharges"]) * 0.84
+        (Km * rates["Roundtrip"] + Hour * rates["Waitingcharges"]) * 0.94
       );
       if (Offer < baseFare) {
         throw new Error(`Minimum fare is ₹ ${baseFare}`);
@@ -1545,9 +1583,13 @@ exports.bookcab = async (req, res) => {
       Hour,
       UserId: user.UserId,
       PublishOn: new Date().getTime(),
+      Operator: Operator == "Yes",
     };
     if (TripType !== "Rental") {
       booking = { ...booking, To };
+    }
+    if (TripType == "Roundtrip") {
+      booking = { ...booking, ReturnDate: new Date(returndate) };
     }
     booking = new Booking(booking);
     const result = await booking.save();

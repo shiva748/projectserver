@@ -27,10 +27,6 @@ const BookingSchema = new Schema({
     type: String,
     required: true,
   },
-  OP: {
-    type: Boolean,
-    required: true,
-  },
   From: {
     description: {
       type: String,
@@ -67,6 +63,9 @@ const BookingSchema = new Schema({
     type: Date,
     required: true,
   },
+  ReturnDate: {
+    type: Date,
+  },
   Category: {
     type: String,
     enum: ["Micro", "Sedan", "MUV", "SUV"],
@@ -98,6 +97,10 @@ const BookingSchema = new Schema({
       type: String,
     },
   ],
+  Operator: {
+    type: Boolean,
+    required:true
+  },
   Bids: [
     {
       OperatorId: {
