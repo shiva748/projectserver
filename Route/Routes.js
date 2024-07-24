@@ -48,6 +48,8 @@ const {
   genrateOtp,
   startTrip,
   endTrip,
+  rejectdriverrequest,
+  callOperator,
 } = require("../Controller/controller");
 const path = require("path");
 const fs = require("fs");
@@ -169,5 +171,9 @@ Router.post("/Driver/booking/otp", verifyToken, genrateOtp);
 Router.post("/Driver/booking/start", verifyToken, startTrip);
 
 Router.post("/Driver/booking/end", verifyToken, endTrip);
+
+Router.get("/Driver/reject-request", verifyToken, rejectdriverrequest);
+
+Router.post("/Operator/booking/call-operator", verifyToken, callOperator)
 
 module.exports = Router;

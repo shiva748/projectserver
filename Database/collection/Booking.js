@@ -99,7 +99,7 @@ const BookingSchema = new Schema({
   ],
   Operator: {
     type: Boolean,
-    required:true
+    required: true,
   },
   Bids: [
     {
@@ -191,6 +191,15 @@ const BookingSchema = new Schema({
   },
   Fee: {
     type: Number,
+  },
+  OPF: {
+    deducted: {
+      type: Boolean,
+      default:false
+    },
+    amount: {
+      type: Number,
+    },
   },
 });
 

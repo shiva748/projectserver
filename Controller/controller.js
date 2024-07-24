@@ -17,20 +17,12 @@ const {
 
 exports.login = async (req, res) => {
   try {
-    const { EmailId, PhoneNo, Password } = req.body;
+    const { PhoneNo, Password } = req.body;
     let filter = {};
-    if (!EmailId && !PhoneNo) {
-      const error = new Error("either Email or PhoneNo is required");
+    if (!PhoneNo) {
+      const error = new Error("PhoneNo is required");
       error.status = 400;
       throw error;
-    }
-    if (EmailId) {
-      if (!validator.isEmail(EmailId)) {
-        const error = new Error("Invalid Credentials");
-        error.status = 400;
-        throw error;
-      }
-      filter.EmailId = EmailId.toLowerCase();
     }
     if (PhoneNo) {
       if (!validator.isMobilePhone(PhoneNo, "en-IN")) {
@@ -130,7 +122,7 @@ exports.signup = async (req, res) => {
     let result = await tempUser.save();
     let response = await sendOTP(
       "+91" + PhoneNo,
-      EmailId.toLowerCase(),
+      "",
       "",
       "",
       OtpId,
@@ -1246,6 +1238,60 @@ exports.RegisterDriver = async (req, res) => {
       await cleanupFiles(folder);
       throw error;
     }
+    if (IsDriver == "true") {
+      return;
+    }
+    try {
+      profile.tokens.for((itm) => {
+        if (itm.fcm && itm.expire > new Date().getTime()) {
+          try {
+            sendNotification(itm.fcm, {
+              title: "Driver Request",
+              body: `${user.Name.split(" ")[0]} want's to add you as driver`,
+            });
+          } catch (error) {}
+        }
+      });
+    } catch (error) {}
+  } catch (error) {
+    console.log(error);
+    res.status(400).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === reject driver request === === === //
+
+exports.rejectdriverrequest = async (req, res) => {
+  try {
+    let user = req.user;
+    let profile = await Driver.findOne({
+      UserId: user.UserId,
+      Status: { $in: ["approved", "pending"] },
+    });
+    await Driver.deleteOne({ DriverId: profile.DriverId });
+    res.status(200).json({ success: true, message: "request rejected" });
+    let oup = await User.findOne({
+      UserId: "User-" + profile.OperatorId.split("-")[1],
+    });
+    oup.tokens.forEach((itm) => {
+      if (itm.fcm && itm.expire > new Date().getTime()) {
+        try {
+          sendNotification(itm.fcm, {
+            title: "Request Rejected",
+            body: `${
+              user.Name.split(" ")[0]
+            } has rejected the request to be your driver`,
+          });
+        } catch (error) {}
+      }
+    });
+    let folder = path.join(__dirname, "../files/driver/", profile.DriverId);
+    try {
+      await cleanupFiles(folder);
+    } catch (error) {}
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -2347,16 +2393,38 @@ exports.acceptOffer = async (req, res) => {
         Name: driver.Name,
         PhoneNo: driver.PhoneNo,
       },
-      Fee: process.env.BIDFEE,
     };
-    if (process.env.BIDFEE > 0) {
-      let deduction = await deductfee(
-        OperatorId,
-        process.env.BIDFEE,
-        booking.BookingId
-      );
-      if (!deduction.result) {
-        throw new Error("Can't accept this offer");
+    if (!booking.Operator) {
+      update = { ...update, Fee: process.env.BIDFEE };
+      if (process.env.BIDFEE > 0) {
+        let deduction = await deductfee(
+          OperatorId,
+          process.env.BIDFEE,
+          booking.BookingId
+        );
+        if (!deduction.result) {
+          throw new Error("Can't accept this offer");
+        }
+      }
+    } else {
+      if (!booking.OPF.deducted) {
+        update = {
+          ...update,
+          OPF: {
+            deducted: true,
+            amount: process.env.OPFEE,
+          },
+        };
+        if (process.env.OPFEE > 0) {
+          let deduction = await deductfee(
+            user.Operator.OperatorId,
+            process.env.OPFEE,
+            booking.BookingId
+          );
+          if (!deduction.result) {
+            throw new Error("Please recharge your operator wallet");
+          }
+        }
       }
     }
     let result = await Booking.updateOne({ BookingId: BookingId }, update);
@@ -2622,6 +2690,7 @@ exports.cancelBooking = async (req, res) => {
     }
 
     if (
+      !booking.Operator &&
       booking.Fee > 0 &&
       Reasons.length == 1 &&
       Reasons[0] == "Plan changed"
@@ -2986,6 +3055,62 @@ exports.endTrip = async (req, res) => {
         }
       });
     } catch (error) {}
+  } catch (error) {
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
+  }
+};
+
+// === === === call operator === === === //
+
+exports.callOperator = async (req, res) => {
+  try {
+    let user = req.user;
+    if (!user || !user.Operator || user.Operator.Status != "active") {
+      throw new Error("Invalid request: Unauthorized access 1");
+    }
+    let { BookingId, OperatorId } = req.body;
+    let booking = await Booking.findOne({
+      BookingId,
+      Status: "pending",
+      UserId: user.UserId,
+    });
+    if (!booking.Operator) {
+      throw new Error("Invalid request: Invalid Booking type");
+    }
+    if (!booking) {
+      throw new Error("No valid BookingId provided");
+    }
+    let bid = booking.Bids.find((itm) => itm.OperatorId == OperatorId);
+    if (!bid) {
+      throw new Error("No offer on this booking from selected Operator");
+    }
+    let update;
+    if (!booking.OPF.deducted) {
+      update = {
+        OPF: {
+          deducted: true,
+          amount: process.env.OPFEE,
+        },
+      };
+      if (process.env.OPFEE > 0) {
+        let deduction = await deductfee(
+          user.Operator.OperatorId,
+          process.env.OPFEE,
+          booking.BookingId
+        );
+        if (!deduction.result) {
+          throw new Error("Please recharge your operator wallet");
+        }
+        await Booking.updateOne({ BookingId, UserId: user.UserId }, update);
+      }
+    }
+    let operator = await User.findOne({
+      UserId: "User-" + OperatorId.split("-")[1],
+    });
+    return res.status(200).json({ success: true, data: operator.PhoneNo });
   } catch (error) {
     res.status(error.status || 500).json({
       success: false,
