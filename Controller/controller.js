@@ -6,6 +6,7 @@ const { sendOTP, verifyOTP } = require("otpless-node-js-auth-sdk");
 const uniqid = require("uniqid");
 const { getCurrentRates } = require("./multiplier/fare");
 const Driver = require("../Database/collection/Driver");
+const Otp = require("../Database/collection/Otp");
 const {
   initializeWallet,
   initate_topup,
@@ -79,31 +80,51 @@ exports.signup = async (req, res) => {
     let { EmailId, Name, PhoneNo, Password, CPassword } = req.body;
 
     if (!validator.isEmail(EmailId)) {
-      throw new Error("Please enter a valid email");
+      let error = new Error("Please enter a valid email");
+      error.status = 400;
+      throw error;
     }
 
     if (!validator.isLength(Name, { min: 3, max: 50 })) {
-      throw new Error("Name should be between 3 and 50 characters long");
+      let error = new Error("Name should be between 3 and 50 characters long");
+      error.status = 400;
+      throw error;
     }
 
     if (!validator.isMobilePhone(PhoneNo, "en-IN")) {
-      throw new Error("Please enter a valid phone number");
+      let error = new Error("Please enter a valid phone number");
+      error.status = 400;
+      throw error;
     }
     if (!validator.isLength(PhoneNo, { min: 10, max: 10 })) {
-      throw new Error("Please enter a valid phone number without country code");
+      let error = new Error(
+        "Please enter a valid phone number without country code"
+      );
+      error.status = 400;
+      throw error;
     }
     if (Password !== CPassword) {
-      throw new Error("Passwords do not match");
+      let error = new Error("Passwords do not match");
+      error.status = 400;
+      throw error;
     }
 
     if (!validator.isLength(Password, { min: 8, max: 50 })) {
-      throw new Error("Password should be at least 8 to 50 characters long");
+      let error = new Error(
+        "Password should be at least 8 to 50 characters long"
+      );
+      error.status = 400;
+      throw error;
     }
     const existingUser = await User.findOne({
       $or: [{ EmailId: EmailId.toLowerCase() }, { PhoneNo: "+91" + PhoneNo }],
     });
     if (existingUser) {
-      throw new Error("User with given email or phone number already exists");
+      let error = new Error(
+        "User with given email or phone number already exists"
+      );
+      error.status = 400;
+      throw error;
     }
     await TempUser.findOneAndDelete({
       $or: [{ EmailId: EmailId.toLowerCase() }, { PhoneNo: "+91" + PhoneNo }],
@@ -140,7 +161,7 @@ exports.signup = async (req, res) => {
       throw new Error("Failed to send Otp for verification");
     }
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -151,16 +172,26 @@ exports.verifyOTP = async (req, res) => {
   try {
     const { EmailId, PhoneNo, OTP } = req.body;
     if (!validator.isEmail(EmailId)) {
-      throw new Error("Please enter a valid email");
+      let error = new Error("Please enter a valid email");
+      error.status = 400;
+      throw error;
     }
     if (!validator.isMobilePhone(PhoneNo, "en-IN")) {
-      throw new Error("Please enter a valid phone number");
+      let error = new Error("Please enter a valid phone number");
+      error.status = 400;
+      throw error;
     }
     if (!validator.isLength(PhoneNo, { min: 10, max: 10 })) {
-      throw new Error("Please enter a valid phone number without country code");
+      let error = new Error(
+        "Please enter a valid phone number without country code"
+      );
+      error.status = 400;
+      throw error;
     }
     if (!validator.isLength(OTP, { min: 4, max: 6 })) {
-      throw new Error("Please enter a valid OTP");
+      let error = new Error("Please enter a valid OTP");
+      error.status = 400;
+      throw error;
     }
     const tempUser = await TempUser.findOne({
       EmailId: EmailId.toLowerCase(),
@@ -168,7 +199,15 @@ exports.verifyOTP = async (req, res) => {
     });
     let curtime = new Date().getTime();
     if (!tempUser || tempUser.OTPExpires < curtime) {
-      throw new Error("Invalid or expired OTP");
+      let error = new Error("Invalid or expired OTP");
+      error.status = 400;
+      throw error;
+    } else if (tempUser.Try >= 5) {
+      return res.status(400).json({
+        success: false,
+        message: "You have exceeded the maximum number of attempts.",
+        close: true,
+      });
     }
     const existingUser = await User.findOne({
       $or: [
@@ -178,11 +217,15 @@ exports.verifyOTP = async (req, res) => {
     });
 
     if (existingUser) {
-      throw new Error("User with given email or phone number already exists");
+      let error = new Error(
+        "User with given email or phone number already exists"
+      );
+      error.status = 400;
+      throw error;
     }
 
     const verify = await verifyOTP(
-      tempUser.EmailId,
+      "",
       tempUser.PhoneNo,
       tempUser.OtpId,
       OTP,
@@ -217,12 +260,171 @@ exports.verifyOTP = async (req, res) => {
         },
       });
     } else {
-      throw new Error("Please enter a valid OTP");
+      tempUser.Try += 1;
+      await tempUser.save();
+      let error = new Error("Please enter a valid OTP");
+      error.status = 400;
+      throw error;
     }
   } catch (error) {
-    res.status(400).json({ message: error.message || "Internal Server Error" });
+    res
+      .status(error.status || 500)
+      .json({ message: error.message || "Internal Server Error" });
   }
 };
+
+// === === === genrate login otp === === === //
+
+exports.genratelotp = async (req, res) => {
+  try {
+    let { PhoneNo } = req.body;
+    let filter = {};
+    if (!PhoneNo) {
+      const error = new Error("PhoneNo is required");
+      error.status = 400;
+      throw error;
+    }
+    if (PhoneNo) {
+      if (!validator.isMobilePhone(PhoneNo, "en-IN")) {
+        const error = new Error("Invalid Credentials");
+        error.status = 400;
+        throw error;
+      }
+      filter.PhoneNo = "+91" + PhoneNo;
+    }
+    let account = await User.findOne(filter);
+    if (!account) {
+      const error = new Error("Invalid Credentials");
+      error.status = 400;
+      throw error;
+    }
+    await Otp.findOneAndDelete(filter);
+    let OtpId = uniqid("Otp-");
+    const otp = new Otp({
+      UserId: account.UserId,
+      PhoneNo: account.PhoneNo,
+      OtpId,
+      OTPExpires: new Date().getTime() + 900 * 1000,
+    });
+
+    let result = await otp.save();
+    let response = await sendOTP(
+      account.PhoneNo,
+      "",
+      "",
+      "",
+      OtpId,
+      900,
+      "6",
+      process.env.OTPCLIENT,
+      process.env.OTPSECRET
+    );
+    if (response.success || !response.errorMessage) {
+      res.status(200).json({
+        success: true,
+        message: "OTP sent to your Phone Number.",
+      });
+    } else {
+      const error = new Error("Unable to send OTP. Please try again later.");
+      error.status = 400;
+      throw error;
+    }
+  } catch (error) {
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
+// === === === verify login otp === === === //
+
+exports.verifyloginOTP = async (req, res) => {
+  try {
+    const { PhoneNo, OTP } = req.body;
+    if (!validator.isMobilePhone(PhoneNo, "en-IN")) {
+      let error = new Error("Please enter a valid phone number");
+      error.status = 400;
+      throw error;
+    }
+    if (!validator.isLength(PhoneNo, { min: 10, max: 10 })) {
+      let error = new Error(
+        "Please enter a valid phone number without country code"
+      );
+      error.status = 400;
+      throw error;
+    }
+    if (!validator.isLength(OTP, { min: 6, max: 6 })) {
+      let error = new Error("Please enter a valid OTP");
+      error.status = 400;
+      throw error;
+    }
+    let account = await User.findOne({ PhoneNo: "+91" + PhoneNo });
+    if (!account) {
+      const error = new Error("Invalid Credentials");
+      error.status = 400;
+      throw error;
+    }
+    let otp = await Otp.findOne({ PhoneNo: account.PhoneNo });
+    if (!otp) {
+      const error = new Error("Invalid Credentials");
+      error.status = 400;
+      throw error;
+    }
+    let curtime = new Date().getTime();
+    if (otp.OTPExpires < curtime) {
+      let error = new Error("Invalid or expired OTP");
+      error.status = 400;
+      throw error;
+    } else if (otp.Try >= 5) {
+      return res.status(400).json({
+        success: false,
+        message: "You have exceeded the maximum number of attempts.",
+        close: true,
+      });
+    }
+    const verify = await verifyOTP(
+      "",
+      otp.PhoneNo,
+      otp.OtpId,
+      OTP,
+      process.env.OTPCLIENT,
+      process.env.OTPSECRET
+    );
+    if (verify.isOTPVerified && !verify.errorMessage) {
+      let token = await account.genrateauth(account);
+
+      res.status(200).json({
+        success: true,
+        token,
+        validity: new Date(new Date().getTime() + 1209600000),
+        message: "Login Successfull",
+        data: {
+          Name: account.Name,
+          EmailId: account.EmailId,
+          PhoneNo: account.PhoneNo,
+          City: account.City,
+          Operator: account.Operator,
+          Driver: account.Driver,
+          UserId: account.UserId,
+          Profile: account.Profile,
+        },
+      });
+    } else {
+      otp.Try += 1;
+      await otp.save();
+      let error = new Error("Please enter a valid OTP");
+      error.status = 400;
+      throw error;
+    }
+  } catch (error) {
+    res
+      .status(error.status || 500)
+      .json({ message: error.message || "Internal Server Error" });
+  }
+};
+
+// === === === authenticate === === === //
 
 exports.authenticate = async (req, res) => {
   try {
@@ -282,20 +484,28 @@ exports.change_password = async (req, res) => {
     const { Opassword, newPassword } = req.body;
 
     if (!Opassword || !newPassword) {
-      throw new Error("All fields are required");
+      let error = new Error("All fields are required");
+      error.status = 400;
+      throw error;
     }
 
     if (!validator.isLength(Opassword, { min: 8, max: 50 })) {
-      throw new Error("Please enter valid credentials");
+      let error = new Error("Please enter valid credentials");
+      error.status = 400;
+      throw error;
     }
 
     if (!validator.isLength(newPassword, { min: 8, max: 50 })) {
-      throw new Error("Password must be 8 to 50 characters long");
+      let error = new Error("Password must be 8 to 50 characters long");
+      error.status = 400;
+      throw error;
     }
 
     const isMatch = await Bcrypt.compare(Opassword, user.Password);
     if (!isMatch) {
-      throw new Error("Invalid password");
+      let error = new Error("Invalid password");
+      error.status = 400;
+      throw error;
     }
 
     const hashedPassword = await Bcrypt.hash(newPassword, 10);
@@ -416,7 +626,9 @@ try {
 const getCity = async (query) => {
   try {
     if (!query) {
-      throw new Error("Search query is required");
+      let error = new Error("Search query is required");
+      error.status = 400;
+      throw error;
     }
     const cachedResult = citycache.get(query.toLowerCase());
     if (cachedResult) {
@@ -451,9 +663,9 @@ exports.citysearch = async (req, res) => {
     let predictions = await getCity(query);
     res.status(200).json(predictions);
   } catch (error) {
-    res
-      .status(500)
-      .send({ error: "An error occurred while searching for cities" });
+    res.status(error.status || 500).send({
+      error: error.message || "An error occurred while searching for cities",
+    });
   }
 };
 
@@ -497,7 +709,9 @@ try {
 const getdistance = async (places) => {
   try {
     if (!places || places.length != 2) {
-      throw new Error("two places are required to calculate distance");
+      let error = new Error("two places are required to calculate distance");
+      error.status = 400;
+      throw error;
     }
     const cachedResult =
       d_cache.get(`${places[0].place_id}${places[1].place_id}`) ||
@@ -537,6 +751,8 @@ const getdistance = async (places) => {
 
     const data = await response.json();
     if (data.error) {
+      let error = new Error("failed to fetch distance");
+      error.status = 400;
       throw error;
     }
     data.routes[0].polyline = null;
@@ -558,9 +774,9 @@ exports.distance = async (req, res) => {
     let dis = await getdistance(places);
     res.json(dis);
   } catch (error) {
-    res
-      .status(500)
-      .json({ error: "An error occurred while processing the request" });
+    res.status(error.status || 500).json({
+      error: error.message || "An error occurred while processing the request",
+    });
   }
 };
 
@@ -617,37 +833,6 @@ exports.logout = async (req, res) => {
 
 // === === === longitude & latitude === === === //
 
-// async function getLatLong(placeId) {
-//   const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${process.env.GOOGLE}`;
-//   try {
-//     if (!placeId) {
-//       if (!response.ok) {
-//         throw new Error(`please provide a placeId`);
-//       }
-//     }
-//     const response = await fetch(url);
-//     if (!response.ok) {
-//       throw new Error(`HTTP error! Status: ${response.status}`);
-//     }
-//     const data = await response.json();
-//     const result = data.result;
-//     if (result) {
-//       const location = result.geometry.location;
-//       return {
-//         latitude: location.lat,
-//         longitude: location.lng,
-//         description: result.formatted_address,
-//         place_id: result.place_id,
-//       };
-//     } else {
-//       throw new Error("No result found for the provided place_id.");
-//     }
-//   } catch (error) {
-//     console.error("Error fetching location:", error);
-//     return null;
-//   }
-// }
-
 const llcache = "./cache/ll_cache.json";
 
 let ll_cache;
@@ -669,7 +854,9 @@ async function getLatLong(address) {
   )}&key=${process.env.GOOGLE}`;
   try {
     if (!address) {
-      throw new Error("Please provide an address");
+      let error = new Error("Please provide an address");
+      error.status = 400;
+      throw error;
     }
     let ccr = ll_cache.get(address);
     if (ccr) {
@@ -693,11 +880,13 @@ async function getLatLong(address) {
       ll_cache.set(res.description, res);
       return res;
     } else {
-      throw new Error("No result found for the provided address.");
+      let error = new Error("No result found for the provided address.");
+      error.status = 400;
+      throw error;
     }
   } catch (error) {
     console.error("Error fetching location from Google Maps:", error);
-    return null;
+    throw error;
   }
 }
 
@@ -726,13 +915,17 @@ exports.updatedetails = async (req, res) => {
     let { fields, files } = await busboyPromise(req);
 
     if (!fields.City && !files.Profile) {
-      throw new Error("Invalid Request");
+      let error = new Error("Invalid Request");
+      error.status = 400;
+      throw error;
     }
     let update = {};
     if (fields.City) {
       fields.City = JSON.parse(fields.City);
       if (!fields.City.place_id) {
-        throw new Error("Please select a city from list");
+        let error = new Error("Please select a city from list");
+        error.status = 400;
+        throw error;
       }
       let lola = await getLatLong(fields.City.description);
       update = { City: lola };
@@ -757,7 +950,7 @@ exports.updatedetails = async (req, res) => {
       data: update,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -802,16 +995,22 @@ exports.registerOperator = async (req, res) => {
   try {
     const user = req.user;
     if (user.Operator && user.Operator.OperatorId) {
-      throw new Error(`You already have a Operator profile`);
+      let error = new Error(`You already have a Operator profile`);
+      error.status = 400;
+      throw error;
     }
     const { fields, files } = await busboyPromise(req);
     ["AadhaarFront", "AadhaarRear", "Profile"].forEach((itm) => {
       if (!files[itm]) {
-        throw new Error(`Please select a ${itm} image`);
+        let error = new Error(`Please select a ${itm} image`);
+        error.status = 400;
+        throw error;
       }
     });
     if (files.length > 3) {
-      throw new Error("Invalid request");
+      let error = new Error("Invalid request");
+      error.status = 400;
+      throw error;
     }
     const requiredFields = [
       {
@@ -837,15 +1036,21 @@ exports.registerOperator = async (req, res) => {
     ];
     requiredFields.forEach(({ key, validator, message }) => {
       if (!fields[key]) {
-        throw new Error(`Please enter your ${key}`);
+        let error = new Error(`Please enter your ${key}`);
+        error.status = 400;
+        return error;
       }
       if (validator && !validator(fields[key])) {
-        throw new Error(`${message}`);
+        let error = new Error(`${message}`);
+        error.status = 400;
+        throw error;
       }
     });
     const dobPattern = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
     if (!dobPattern.test(fields.Dob)) {
-      throw new Error("Dob must be in format DD/MM/YYYY.");
+      let error = new Error("Dob must be in format DD/MM/YYYY.");
+      error.status = 400;
+      throw error;
     }
 
     const [day, month, year] = fields.Dob.split("/").map(Number);
@@ -860,19 +1065,29 @@ exports.registerOperator = async (req, res) => {
       (age === 18 &&
         (monthDifference < 0 || (monthDifference === 0 && dayDifference < 0)))
     ) {
-      throw new Error("User must be at least 18 years old.");
+      let error = new Error("User must be at least 18 years old.");
+      error.status = 400;
+      throw error;
     }
 
     if (user.PhoneNo === `+91${fields.EmergencyNumber}`) {
-      throw new Error("Please provide a different emergency contact number");
+      let error = new Error(
+        "Please provide a different emergency contact number"
+      );
+      error.status = 400;
+      throw error;
     }
 
     if (!fields.City) {
-      throw new Error("Please Select a City");
+      let error = new Error("Please Select a City");
+      error.status = 400;
+      throw error;
     }
     fields.City = JSON.parse(fields.City);
     if (!fields.City.place_id || !fields.City.description) {
-      throw new Error("Please Select a City");
+      let error = new Error("Please Select a City");
+      error.status = 400;
+      throw error;
     }
     fields.City = await getLatLong(fields.City.description);
     const id = "Operator-" + user.UserId.slice(5, user.UserId.length);
@@ -925,7 +1140,7 @@ exports.registerOperator = async (req, res) => {
       throw error;
     }
   } catch (error) {
-    res.status(400).json({
+    res.status(res.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -990,16 +1205,22 @@ exports.SearchDriver = async (req, res) => {
     }
     let { EmailId, PhoneNo } = req.body;
     if (!EmailId || !PhoneNo) {
-      throw new Error("Please Enter Both EmailId and PhoneNo");
+      let error = new Error("Please Enter Both EmailId and PhoneNo");
+      error.status = 400;
+      throw error;
     }
     if (!validator.isEmail(EmailId)) {
-      throw new Error("Please enter a valid EmailId");
+      let error = new Error("Please enter a valid EmailId");
+      error.status = 400;
+      throw error;
     }
     if (
       !validator.isMobilePhone(PhoneNo, "en-IN") ||
       !validator.isLength(PhoneNo, { min: 10, max: 10 })
     ) {
-      throw new Error("Please enter a valid 10 digit PhoneNo");
+      let error = new Error("Please enter a valid 10 digit PhoneNo");
+      error.status = 400;
+      throw error;
     }
     const driver = await User.findOne({
       EmailId: EmailId.toLowerCase(),
@@ -1012,10 +1233,12 @@ exports.SearchDriver = async (req, res) => {
         data: { Name: driver.Name, UserId: driver.UserId },
       });
     } else {
-      throw new Error("No Profile Found");
+      let error = new Error("No Profile Found");
+      error.status = 400;
+      throw error;
     }
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -1071,10 +1294,14 @@ exports.RegisterDriver = async (req, res) => {
       IsDriver,
     } = fields;
     if (IsDriver === undefined) {
-      throw new Error("IsDriver field in required");
+      let error = new Error("IsDriver field in required");
+      error.status = 400;
+      throw error;
     }
     const throwValidationError = (message) => {
-      throw new Error(message);
+      let error = new Error(message);
+      error.status = 400;
+      throw error;
     };
 
     if (IsDriver === "true") {
@@ -1156,7 +1383,9 @@ exports.RegisterDriver = async (req, res) => {
     isValidFutureDate(DLValidity);
     ["DLFront", "DLRear"].forEach((itm) => {
       if (!files[itm]) {
-        throw new Error(`Please select a ${itm} image`);
+        let error = new Error(`Please select a ${itm} image`);
+        error.status = 400;
+        throw error;
       }
     });
     let filter;
@@ -1254,8 +1483,7 @@ exports.RegisterDriver = async (req, res) => {
       });
     } catch (error) {}
   } catch (error) {
-    console.log(error);
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -1354,13 +1582,15 @@ exports.Activate = async (req, res) => {
     ]);
 
     if (!driver || !cab) {
-      throw new Error(
+      let error = new Error(
         !driver && !cab
           ? "Please add a cab and driver"
           : !cab
           ? "Please add a cab"
           : "Please add a driver"
       );
+      error.status = 400;
+      throw error;
     }
 
     await Operator.updateOne(
@@ -1382,7 +1612,7 @@ exports.Activate = async (req, res) => {
       .status(201)
       .json({ success: true, message: "Profile activation was successful" });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -1411,27 +1641,37 @@ exports.RegisterCab = async (req, res) => {
     ["Photo", "Permit", "Authorization", "RegistrationCertificate"].forEach(
       (itm) => {
         if (!files[itm]) {
-          throw new Error(
+          let error = new Error(
             `Please select a ${itm === "Photo" ? "Cab" : itm} image`
           );
+          error.status = 400;
+          throw error;
         }
       }
     );
     if (Model == undefined || CabNumber == undefined) {
-      throw new Error(`All fields are required`);
+      let error = new Error(`All fields are required`);
+      error.status = 400;
+      throw error;
     }
     if (!validator.isLength(CabNumber, { max: 14, min: 9 })) {
-      throw new Error("please enter a valid Cab Number");
+      let error = new Error("please enter a valid Cab Number");
+      error.status = 400;
+      throw error;
     }
     Model = JSON.parse(Model);
     ["name", "manufacturer", "segment"].forEach((itm) => {
       if (!Model[itm]) {
-        throw new Error(`${itm} of cab is required`);
+        let error = new Error(`${itm} of cab is required`);
+        error.status = 400;
+        throw error;
       }
     });
     const exist = await Cab.findOne({ CabNumber, status: { $ne: "unlinked" } });
     if (exist) {
-      throw new Error("Cab Aleready linked with other operator");
+      let error = new Error("Cab Aleready linked with other operator");
+      error.status = 400;
+      throw error;
     }
     let id = uniqid("Cab-");
     let folderpath = await path.join(__dirname, "../files/cab/", id);
@@ -1467,7 +1707,7 @@ exports.RegisterCab = async (req, res) => {
       throw error;
     }
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -1502,11 +1742,15 @@ exports.bookcab = async (req, res) => {
       "Operator",
     ].forEach((itm) => {
       if (!req.body[itm]) {
-        throw new Error("Invalid Request all fields are required");
+        let error = new Error("Invalid Request all fields are required 1");
+        error.status = 400;
+        throw error;
       }
     });
     if (!["Yes", "No"].includes(Operator)) {
-      throw new Error("Invalid input");
+      let error = new Error("Invalid input");
+      error.status = 400;
+      throw error;
     }
     if (Operator == "Yes") {
       if (
@@ -1518,22 +1762,30 @@ exports.bookcab = async (req, res) => {
       }
     }
     if (!["Roundtrip", "Oneway", "Rental"].some((itm) => itm == TripType)) {
-      throw new Error("Invalid input");
+      let error = new Error("Invalid input");
+      error.status = 400;
+      throw error;
     }
 
     if (!["Micro", "Sedan", "MUV", "SUV"].some((itm) => itm == Category)) {
-      throw new Error("Invalid input");
+      let error = new Error("Invalid input");
+      error.status = 400;
+      throw error;
     }
 
     if (TripType != "Rental" && !To) {
-      throw new Error("Invalid Request all fields are required");
+      let error = new Error("Invalid Request all fields are required");
+      error.status = 400;
+      throw error;
     }
     [From, To].forEach((itm) => {
       if (itm) {
         if (
           ["description", "place_id", "query"].some((subitm) => !itm[subitm])
         ) {
-          throw new Error("Invalid input");
+          let error = new Error("Invalid input");
+          error.status = 400;
+          throw error;
         }
       }
     });
@@ -1541,18 +1793,24 @@ exports.bookcab = async (req, res) => {
       let suggest = await getSuggestion(From.query);
       From = suggest.filter((itm) => itm.place_id == From.place_id)[0];
       if (!From) {
-        throw new Error("Please select a location from list");
+        let error = new Error("Please select a location from list");
+        error.status = 400;
+        throw error;
       }
       suggest = await getSuggestion(To.query);
       To = suggest.filter((itm) => itm.place_id == To.place_id)[0];
       if (!To) {
-        throw new Error("Please select a location from list");
+        let error = new Error("Please select a location from list");
+        error.status = 400;
+        throw error;
       }
     } else {
       let suggest = await getCity(From.query);
       From = suggest.filter((itm) => itm.place_id == From.place_id)[0];
       if (!From) {
-        throw new Error("Please select a City from list");
+        let error = new Error("Please select a City from list");
+        error.status = 400;
+        throw error;
       }
     }
     let t_d = new Date(Time);
@@ -1561,13 +1819,19 @@ exports.bookcab = async (req, res) => {
     d_t.setHours(t_d.getHours());
     d_t.setMinutes(t_d.getMinutes());
     if (thf > d_t) {
-      throw new Error("Select a date and time at least 2 hours in the future.");
+      let error = new Error(
+        "Select a date and time at least 2 hours in the future."
+      );
+      error.status = 400;
+      throw error;
     }
     if (TripType == "Roundtrip") {
       if (returndate < Dat) {
-        throw new Error(
+        let error = new Error(
           "The return date must be the same as or later than the pickup date."
         );
+        error.status = 400;
+        throw error;
       }
     }
     Dat = d_t;
@@ -1591,28 +1855,38 @@ exports.bookcab = async (req, res) => {
         baseFare *= 2;
       }
       if (Offer < baseFare) {
-        throw new Error(`Minimum fare is ₹ ${baseFare}`);
+        let error = new Error(`Minimum fare is ₹ ${baseFare}`);
+        error.status = 400;
+        throw error;
       }
     } else {
       From = await getLatLong(From.description);
       if (Hour > 12 || Km > 200) {
-        throw new Error("Invalid Input");
+        let error = new Error("Invalid Input");
+        error.status = 400;
+        throw error;
       }
       if (Km / 10 < Hour) {
-        throw new Error("Invalid Input");
+        let error = new Error("Invalid Input");
+        error.status = 400;
+        throw error;
       }
       const result = getCurrentRates();
       const rates = result[Category];
 
       if (!rates || !rates["Roundtrip"]) {
-        throw new Error("Invalid carType or tripType");
+        let error = new Error("Invalid carType or tripType");
+        error.status = 400;
+        throw error;
       }
 
       let baseFare = Math.ceil(
         (Km * rates["Roundtrip"] + Hour * rates["Waitingcharges"]) * 0.94
       );
       if (Offer < baseFare) {
-        throw new Error(`Minimum fare is ₹ ${baseFare}`);
+        let error = new Error(`Minimum fare is ₹ ${baseFare}`);
+        error.status = 400;
+        throw error;
       }
     }
 
@@ -1645,7 +1919,7 @@ exports.bookcab = async (req, res) => {
       data: booking.BookingId,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -1667,7 +1941,9 @@ exports.getDuty = async (req, res) => {
     [From, To].forEach((itm) => {
       if (itm) {
         if (["description", "place_id"].some((subitm) => !itm[subitm])) {
-          throw new Error("Invalid input");
+          let error = new Error("Invalid input");
+          error.status = 400;
+          throw error;
         }
       }
     });
@@ -1748,7 +2024,7 @@ exports.getDuty = async (req, res) => {
       data: bookings,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -1772,8 +2048,6 @@ exports.mydriver = async (req, res) => {
       data: drivers,
     });
   } catch (error) {
-    console.error("Error fetching drivers:", error);
-
     res.status(500).json({
       success: false,
       message: "Internal Server Error: Unable to fetch drivers",
@@ -1912,15 +2186,19 @@ exports.postOffer = async (req, res) => {
 
     const { BookingId, CabId, DriverId, Offer, remove } = req.body;
     if (!BookingId) {
-      throw new Error(
+      let error = new Error(
         "Please provide a valid offer with cab and driver details."
       );
+      error.status = 400;
+      throw error;
     }
     if (!remove) {
       if (!CabId || !DriverId || !Offer) {
-        throw new Error(
+        let error = new Error(
           "Please provide a valid offer with cab and driver details."
         );
+        error.status = 400;
+        throw error;
       }
     }
     let cab, driver, booking;
@@ -1929,10 +2207,14 @@ exports.postOffer = async (req, res) => {
       { PhoneNo: 0 }
     );
     if (!booking) {
-      throw new Error("Booking is either accepted or canceled.");
+      let error = new Error("Booking is either accepted or canceled.");
+      error.status = 400;
+      throw error;
     }
     if (booking.UserId == user.UserId) {
-      throw new Error("you can't bid on your own request");
+      let error = new Error("you can't bid on your own request");
+      error.status = 400;
+      throw error;
     }
     if (!remove) {
       cab = await Cab.findOne({
@@ -1941,7 +2223,9 @@ exports.postOffer = async (req, res) => {
         Status: "verified",
       });
       if (!cab) {
-        throw new Error("Invalid request: Cab not found.");
+        let error = new Error("Invalid request: Cab not found.");
+        error.status = 400;
+        throw error;
       }
 
       driver = await Driver.findOne({
@@ -1950,7 +2234,9 @@ exports.postOffer = async (req, res) => {
         Status: "verified",
       });
       if (!driver) {
-        throw new Error("Invalid request: Driver not found.");
+        let error = new Error("Invalid request: Driver not found.");
+        error.status = 400;
+        throw error;
       }
 
       let prev = booking.Bids.find(
@@ -1963,7 +2249,9 @@ exports.postOffer = async (req, res) => {
         prev.DriverId == driver.DriverId &&
         prev.Offer == Offer
       ) {
-        throw new Error("You cannot submit the same offer again.");
+        let error = new Error("You cannot submit the same offer again.");
+        error.status = 400;
+        throw error;
       }
       let wallet = await Wallet.findOne({
         OperatorId: user.Operator.OperatorId,
@@ -2019,7 +2307,7 @@ exports.postOffer = async (req, res) => {
       data: booking,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error.",
     });
@@ -2107,11 +2395,13 @@ exports.getWallet = async (req, res) => {
     }
     let wallet = await Wallet.findOne({ OperatorId: user.Operator.OperatorId });
     if (!wallet) {
-      throw new Error("No Wallet found");
+      let error = new Error("No Wallet found");
+      error.status = 400;
+      throw error;
     }
     res.status(200).json({ success: true, data: wallet });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error.",
     });
@@ -2140,152 +2430,26 @@ exports.createOrder = async (req, res) => {
     if (
       typeof amount !== "number" ||
       !Number.isInteger(amount) ||
-      amount < 300 ||
+      amount < 100 ||
       amount > 2000
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid amount. Amount must be an integer between 300 and 2000.",
+          "Invalid amount. Amount must be an integer between 100 and 2000.",
       });
     }
     let order = await initate_topup(user.Operator.OperatorId, amount);
     if (!order) {
-      throw new Error("Order creation failed");
+      let error = new Error("Order creation failed");
+      error.status = 400;
+      throw error;
     }
     res.status(201).json({ success: true, data: order });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error.",
-    });
-  }
-};
-
-// === === === serve pay === === === //
-
-exports.servepay = async (req, res) => {
-  try {
-    const { UserId, OrderId } = req.params;
-
-    // Validate Operator
-    const user = await User.findOne({ UserId });
-    if (
-      !user ||
-      !user.Operator ||
-      !user.Operator.verified ||
-      ["pending", "verified"].includes(user.Operator.Status)
-    ) {
-      return res.status(404).send("Wallet not found");
-    }
-
-    // Check Operator's Wallet
-    const wallet = await Wallet.findOne({
-      OperatorId: user.Operator.OperatorId,
-    });
-    if (!wallet) {
-      return res.status(404).send("Wallet not found");
-    }
-
-    // Find Order in Wallet Transactions
-    const order = wallet.Transactions.find((item) => item.orderId === OrderId);
-    if (!order || order.status !== "pending") {
-      return res.status(404).send("Order not found or not pending");
-    }
-
-    // Serve Razorpay Payment Page
-    const html = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Razorpay Payment</title>
-      <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-      <style>
-        /* Add your custom styles here */
-        body {
-          font-family: Arial, sans-serif;
-          background-color: #f0f0f0;
-          padding: 20px;
-        }
-        /* Additional styles as needed */
-      </style>
-    </head>
-    <body>
-      <div id="payment-container">
-        <!-- Razorpay integration script -->
-      </div>
-
-      <script>
-        const key = 'rzp_test_TZAshUrYdjeY7N';
-        const orderId = '${OrderId}';
-        const amount = ${order.amount * 100};
-
-        var options = {
-          key: key,
-          amount: amount,
-          currency: 'INR',
-          name: 'Drive Sync',
-          description: 'Wallet Topup ₹${order.amount}',
-          image: 'https://example.com/logo.png',
-          order_id: orderId,
-          handler: function(response) {
-            alert('Your payment was successful. Please head back to the app.');
-    
-            // Send payment response to server
-            fetch('/Operator/wallet/topup/razorpay/${user.UserId}/${
-      order.orderId
-    }/verify', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                operatorId:'${user.Operator.OperatorId}'
-              })
-            })
-            .then(res => res.json())
-            .then(data => {
-              console.log(data.message);
-            })
-            .catch(err => {
-              console.error('Error:', err);
-            });
-          },
-          prefill: {
-            email: '${user.EmailId}',
-            contact: '${user.PhoneNo.slice(3)}',
-            name: '${user.Name}'
-          },
-          theme: {
-            color: '#53a20e'
-          }
-        };
-
-        // Automatically load Razorpay checkout on page load
-        var rzp = new Razorpay(options);
-        rzp.open();
-        document.addEventListener("visibilitychange", function() {
-          if (document.visibilityState === 'hidden') {
-              // Display a message or take action when the page is hidden
-              alert('Please wait while your payment is being processed.');
-          }
-      });
-      
-      </script>
-    </body>
-    </html>
-    `;
-
-    res.status(200).send(html);
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message || "Internal Server Error",
     });
   }
 };
@@ -2345,7 +2509,9 @@ exports.acceptOffer = async (req, res) => {
     const { BookingId, OperatorId } = req.body;
     const user = req.user;
     if (!BookingId || !OperatorId) {
-      throw new Error("Invalid request");
+      let error = new Error("Invalid request");
+      error.status = 400;
+      throw error;
     }
     let booking = await Booking.findOne({
       BookingId,
@@ -2353,11 +2519,15 @@ exports.acceptOffer = async (req, res) => {
       Status: "pending",
     });
     if (!booking) {
-      throw new error("Invalid request");
+      let error = new error("Invalid request");
+      error.status = 400;
+      throw error;
     }
     let bid = await booking.Bids.find((itm) => itm.OperatorId === OperatorId);
     if (!bid) {
-      throw new Error("can't find the offer");
+      let error = new Error("can't find the offer");
+      error.status = 400;
+      throw error;
     }
     let driver = await Driver.findOne({
       OperatorId,
@@ -2365,7 +2535,9 @@ exports.acceptOffer = async (req, res) => {
       Status: { $ne: "unlinked" },
     });
     if (!driver) {
-      throw new Error("can't find the specified driver");
+      let error = new Error("can't find the specified driver");
+      error.status = 400;
+      throw error;
     }
     let cab = await Cab.findOne({
       OperatorId,
@@ -2373,7 +2545,9 @@ exports.acceptOffer = async (req, res) => {
       Status: { $ne: "unlinked" },
     });
     if (!cab) {
-      throw new Error("can't find the specified cab");
+      let error = new Error("can't find the specified cab");
+      error.status = 400;
+      throw error;
     }
     let update = {
       Status: "confirmed",
@@ -2403,7 +2577,9 @@ exports.acceptOffer = async (req, res) => {
           booking.BookingId
         );
         if (!deduction.result) {
-          throw new Error("Can't accept this offer");
+          let error = new Error("Can't accept this offer");
+          error.status = 400;
+          throw error;
         }
       }
     } else {
@@ -2422,7 +2598,9 @@ exports.acceptOffer = async (req, res) => {
             booking.BookingId
           );
           if (!deduction.result) {
-            throw new Error("Please recharge your operator wallet");
+            let error = new Error("Please recharge your operator wallet");
+            error.status = 400;
+            throw error;
           }
         }
       }
@@ -2467,7 +2645,7 @@ exports.acceptOffer = async (req, res) => {
       console.log(error);
     }
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -2568,7 +2746,9 @@ exports.getOBookings = async (req, res) => {
     }
     let { type } = req.body;
     if (!["current", "completed", "cancelled"].some((itm) => itm == type)) {
-      throw new Error("Invalid request");
+      let error = new Error("Invalid request");
+      error.status = 400;
+      throw error;
     }
     let filter = {
       "AcceptedBid.OperatorId": user.Operator.OperatorId,
@@ -2613,7 +2793,9 @@ exports.getDBookings = async (req, res) => {
     }
     let { type } = req.body;
     if (!["current", "completed", "cancelled"].some((itm) => itm == type)) {
-      throw new Error("Invalid request");
+      let error = new Error("Invalid request");
+      error.status = 400;
+      throw error;
     }
     let filter = {
       "DriverDetails.DriverId": user.Driver.DriverId,
@@ -2636,7 +2818,7 @@ exports.getDBookings = async (req, res) => {
       data: booking,
     });
   } catch (error) {
-    res.status(400).json({
+    res.status(error.status || 500).json({
       success: false,
       message: error.message || "Internal Server Error",
     });
@@ -2660,6 +2842,7 @@ exports.cancelBooking = async (req, res) => {
 
     if (
       !Array.isArray(Reasons) ||
+      Reasons.length == 0 ||
       !Reasons.every(
         (reason) => typeof reason === "string" && reasons.includes(reason)
       )
@@ -2697,7 +2880,9 @@ exports.cancelBooking = async (req, res) => {
     ) {
       let refund = await refundfee(booking.BookingId, user.UserId);
       if (!refund.success) {
-        throw new Error("Request failed, unable to cancel the booking.");
+        let error = new Error("Request failed, unable to cancel the booking.");
+        error.status = 400;
+        throw error;
       }
     } else {
       booking.Status = "cancelled";
@@ -3069,7 +3254,9 @@ exports.callOperator = async (req, res) => {
   try {
     let user = req.user;
     if (!user || !user.Operator || user.Operator.Status != "active") {
-      throw new Error("Invalid request: Unauthorized access 1");
+      let error = new Error("Invalid request: Unauthorized access 1");
+      error.status = 400;
+      throw error;
     }
     let { BookingId, OperatorId } = req.body;
     let booking = await Booking.findOne({
@@ -3078,14 +3265,18 @@ exports.callOperator = async (req, res) => {
       UserId: user.UserId,
     });
     if (!booking.Operator) {
-      throw new Error("Invalid request: Invalid Booking type");
+      let error = new Error("Invalid request: Invalid Booking type");
+      error.status = 400;
+      throw error;
     }
     if (!booking) {
-      throw new Error("No valid BookingId provided");
+      let error = new Error("No valid BookingId provided");
+      error.status = 400;
+      throw error;
     }
     let bid = booking.Bids.find((itm) => itm.OperatorId == OperatorId);
     if (!bid) {
-      throw new Error("No offer on this booking from selected Operator");
+      let error = new Error("No offer on this booking from selected Operator");
     }
     let update;
     if (!booking.OPF.deducted) {
@@ -3102,7 +3293,9 @@ exports.callOperator = async (req, res) => {
           booking.BookingId
         );
         if (!deduction.result) {
-          throw new Error("Please recharge your operator wallet");
+          let error = new Error("Please recharge your operator wallet");
+          error.status = 400;
+          throw error;
         }
         await Booking.updateOne({ BookingId, UserId: user.UserId }, update);
       }

@@ -54,6 +54,9 @@ exports.initate_topup = async (operatorId, amount) => {
     if (!wallet) {
       throw new Error("Unauthorized access: Operator Wallet not found");
     }
+    if (wallet.Balance > 2000 || wallet.Balance + amount > 2000) {
+      throw new Error("A wallet can hold maximum amount of INR 2000");
+    }
     const razorpayOrder = await razorpay.orders.create({
       amount: amount * 100,
       currency: "INR",
@@ -153,7 +156,6 @@ exports.paymentDismiss = async (operatorId, orderId) => {
     const wallet = await Wallet.findOne({ OperatorId: operatorId }).session(
       session
     );
-
     if (!wallet) {
       throw new Error("Unauthorized access");
     }
@@ -162,19 +164,40 @@ exports.paymentDismiss = async (operatorId, orderId) => {
     if (!order || order.status !== "pending") {
       throw new Error("Unauthorized access");
     }
-    order.status = "failed";
-    wallet.Transactions = wallet.Transactions.map((itm) => {
-      if (itm.orderId == order.orderId) {
-        return order;
-      } else {
-        return itm;
-      }
-    });
-    await wallet.save({ session });
-    await session.commitTransaction();
-    session.endSession();
-
-    return { success: true, message: "Payment failed and wallet updated" };
+    let odr = await razorpay.orders.fetchPayments(order.orderId);
+    console.log(odr);
+    if (
+      odr.items.some(
+        (itm) => itm.status == "captured" && itm.order_id == order.orderId
+      )
+    ) {
+      order.status = "completed";
+      wallet.Balance += order.amount;
+      wallet.Transactions = wallet.Transactions.map((itm) => {
+        if (itm.orderId == order.orderId) {
+          return order;
+        } else {
+          return itm;
+        }
+      });
+      await wallet.save({ session });
+      await session.commitTransaction();
+      session.endSession();
+      return { success: true, message: "Payment failed and wallet updated" };
+    } else {
+      order.status = "failed";
+      wallet.Transactions = wallet.Transactions.map((itm) => {
+        if (itm.orderId == order.orderId) {
+          return order;
+        } else {
+          return itm;
+        }
+      });
+      await wallet.save({ session });
+      await session.commitTransaction();
+      session.endSession();
+      return { success: true, message: "Payment failed and wallet updated" };
+    }
   } catch (error) {
     await session.abortTransaction();
     session.endSession();

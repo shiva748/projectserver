@@ -33,7 +33,6 @@ const {
   cancelRequest,
   getWallet,
   createOrder,
-  servepay,
   verifypayment,
   acceptOffer,
   getBookings,
@@ -50,6 +49,8 @@ const {
   endTrip,
   rejectdriverrequest,
   callOperator,
+  genratelotp,
+  verifyloginOTP,
 } = require("../Controller/controller");
 const path = require("path");
 const fs = require("fs");
@@ -75,6 +76,10 @@ Router.get("/media/logo.png", (req, res) => {
 });
 
 Router.post("/login", login);
+
+Router.post("/login/genrate-otp", genratelotp);
+
+Router.post("/login/verify-otp", verifyloginOTP);
 
 Router.post("/register", signup);
 
@@ -142,8 +147,6 @@ Router.get("/Operator/my-wallet", verifyToken, getWallet);
 
 Router.post("/Operator/wallet/topup/create-order", verifyToken, createOrder);
 
-Router.get("/Operator/wallet/topup/razorpay/:UserId/:OrderId", servepay);
-
 Router.post(
   "/Operator/wallet/topup/razorpay/:OrderId/verify",
   verifyToken,
@@ -174,6 +177,6 @@ Router.post("/Driver/booking/end", verifyToken, endTrip);
 
 Router.get("/Driver/reject-request", verifyToken, rejectdriverrequest);
 
-Router.post("/Operator/booking/call-operator", verifyToken, callOperator)
+Router.post("/Operator/booking/call-operator", verifyToken, callOperator);
 
 module.exports = Router;
